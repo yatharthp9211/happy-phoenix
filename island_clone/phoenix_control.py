@@ -210,6 +210,8 @@ class PhoenixControl:
 
         self.apply_glass(self.saved_glass_level())
         self.refresh_all()
+        # Ensure the companion control window starts withdrawn until opened (via 'M' or show)
+        root.withdraw()
         return True
 
     # ------------------------------------------------------------------

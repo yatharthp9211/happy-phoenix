@@ -201,6 +201,104 @@ ALL_SHORTCUT_APPS = [
 ]
 
 # ---------------------------------------------------------------------------
+# Framer Motion Spring Physics Animation Engine
+# ---------------------------------------------------------------------------
+
+class FramerMotionSpring:
+    """Framer Motion spring physics solver for fluid, responsive resizing.
+
+    Replicates Framer Motion's layout spring dynamics:
+    - Mass (m), stiffness (k), damping (c) parameterization.
+    - Continuous velocity preservation across state interruptions.
+    - Exact analytical damped harmonic oscillator solution (numerically stable
+      across all framerates and dt spikes).
+    - Tuned spring presets for Dynamic Island state shifts ('waiting' <-> 'thinking'/'acting').
+    """
+
+    def __init__(self, value: float, stiffness: float = 180.0, damping: float = 24.0, mass: float = 1.0):
+        self.value = float(value)
+        self.target = float(value)
+        self.velocity = 0.0
+        self.stiffness = float(stiffness)
+        self.damping = float(damping)
+        self.mass = float(mass)
+        self.rest_delta = 0.05
+        self.rest_speed = 0.05
+
+    def set_target(self, target: float, stiffness: Optional[float] = None, damping: Optional[float] = None, mass: Optional[float] = None, impulse: Optional[float] = None):
+        self.target = float(target)
+        if stiffness is not None:
+            self.stiffness = float(stiffness)
+        if damping is not None:
+            self.damping = float(damping)
+        if mass is not None:
+            self.mass = float(mass)
+        if impulse is not None:
+            self.velocity += float(impulse)
+
+    def snap_to(self, value: float):
+        self.value = float(value)
+        self.target = float(value)
+        self.velocity = 0.0
+
+    def update(self, dt: float) -> float:
+        if dt <= 0.0:
+            return self.value
+        dt = min(dt, 0.1)
+        x0 = self.value - self.target
+        v0 = self.velocity
+        if abs(x0) < self.rest_delta and abs(v0) < self.rest_speed:
+            self.value = self.target
+            self.velocity = 0.0
+            return self.value
+
+        m = max(1e-4, self.mass)
+        k = max(1e-4, self.stiffness)
+        c = max(0.0, self.damping)
+
+        gamma = c / (2.0 * m)
+        w0_sq = k / m
+        disc = gamma * gamma - w0_sq
+
+        if abs(disc) < 1e-7:
+            # Critically damped
+            a = x0
+            b = v0 + gamma * x0
+            decay = math.exp(-gamma * dt)
+            x_t = decay * (a + b * dt)
+            v_t = decay * (b - gamma * (a + b * dt))
+        elif disc < 0.0:
+            # Underdamped (spring with natural bounce and settling)
+            wd = math.sqrt(-disc)
+            a = x0
+            b = (v0 + gamma * x0) / wd
+            decay = math.exp(-gamma * dt)
+            cos_w = math.cos(wd * dt)
+            sin_w = math.sin(wd * dt)
+            x_t = decay * (a * cos_w + b * sin_w)
+            v_t = -gamma * x_t + decay * (-a * wd * sin_w + b * wd * cos_w)
+        else:
+            # Overdamped
+            r_disc = math.sqrt(disc)
+            r1 = -gamma + r_disc
+            r2 = -gamma - r_disc
+            a = (v0 - r2 * x0) / (r1 - r2)
+            b = x0 - a
+            exp1 = math.exp(r1 * dt)
+            exp2 = math.exp(r2 * dt)
+            x_t = a * exp1 + b * exp2
+            v_t = a * r1 * exp1 + b * r2 * exp2
+
+        self.value = self.target + x_t
+        self.velocity = v_t
+
+        if abs(self.value - self.target) < self.rest_delta and abs(self.velocity) < self.rest_speed:
+            self.value = self.target
+            self.velocity = 0.0
+        return self.value
+
+
+# ---------------------------------------------------------------------------
 # Phoenix Dynamic Island Overlay Class
 # ---------------------------------------------------------------------------
 
@@ -266,6 +364,11 @@ class PhoenixDynamicIslandOverlay:
         self.target_width = 540.0
         self.target_height = 76.0
         self.target_radius = 28.0
+        
+        # Framer Motion spring physics animations for smooth resizing
+        self.spring_width = FramerMotionSpring(540.0, stiffness=180.0, damping=24.0, mass=1.0)
+        self.spring_height = FramerMotionSpring(76.0, stiffness=180.0, damping=24.0, mass=1.0)
+        self.spring_radius = FramerMotionSpring(28.0, stiffness=200.0, damping=25.0, mass=1.0)
         
         # Shortcut grid & settings modal
         self.pinned_apps = ["whatsapp", "spotify", "youtube", "browser"]
@@ -421,6 +524,30 @@ class PhoenixDynamicIslandOverlay:
         self._scan_is_hidden = False
         self.use_moderngl = MODERNGL_AVAILABLE
         self.start_time = time.time()
+
+    def _apply_framer_motion_state_transition(self, prev_state: str, new_state: str):
+        """Configure Framer Motion spring physics for smooth Dynamic Island resizing.
+
+        Handles organic spring expansion when shifting from 'waiting' to 'thinking' or 'acting',
+        and snappy, clean spring collapse when returning to 'waiting'.
+        """
+        is_expanding = new_state in ("working", "thinking", "acting") or bool(self.current_action)
+        is_waiting = new_state in ("waiting", "done")
+
+        if is_expanding:
+            # Framer Motion expansion spring: lively, natural deceleration with gentle organic settle
+            self.spring_width.set_target(self.target_width, stiffness=180.0, damping=22.0, mass=1.0)
+            self.spring_height.set_target(self.target_height, stiffness=175.0, damping=21.0, mass=1.0)
+            self.spring_radius.set_target(self.target_radius, stiffness=200.0, damping=24.0, mass=1.0)
+        elif is_waiting:
+            # Framer Motion collapse spring: snappy, critically damped retraction into idle capsule
+            self.spring_width.set_target(self.target_width, stiffness=220.0, damping=25.0, mass=1.0)
+            self.spring_height.set_target(self.target_height, stiffness=220.0, damping=25.0, mass=1.0)
+            self.spring_radius.set_target(self.target_radius, stiffness=240.0, damping=26.0, mass=1.0)
+        else:
+            self.spring_width.set_target(self.target_width, stiffness=190.0, damping=24.0, mass=1.0)
+            self.spring_height.set_target(self.target_height, stiffness=190.0, damping=24.0, mass=1.0)
+            self.spring_radius.set_target(self.target_radius, stiffness=200.0, damping=25.0, mass=1.0)
 
     # ---- Bot API Callbacks (Called by bot_mk8_vlm.py) ----
     def set_state(self, state: str):
@@ -695,6 +822,33 @@ class PhoenixDynamicIslandOverlay:
                 except Exception:
                     pass
 
+    def _ensure_colorkey(self, hwnd=None):
+        """Re-assert WS_EX_LAYERED and LWA_COLORKEY so the transparent hole RGB(1,1,1) is never lost."""
+        if not IS_WINDOWS:
+            return
+        hwnd = hwnd or self._hwnd()
+        if not hwnd:
+            return
+        try:
+            user32 = ctypes.windll.user32
+            GWL_EXSTYLE = -20
+            WS_EX_LAYERED = 0x00080000
+            LWA_COLORKEY = 0x00000001
+            COLORKEY = 0x00010101
+            style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            if not (style & WS_EX_LAYERED):
+                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED)
+            user32.SetLayeredWindowAttributes(hwnd, COLORKEY, 0, LWA_COLORKEY)
+            SWP_NOMOVE = 0x0002
+            SWP_NOSIZE = 0x0001
+            SWP_NOZORDER = 0x0004
+            SWP_NOACTIVATE = 0x0010
+            SWP_FRAMECHANGED = 0x0020
+            set_window_pos(hwnd, 0, 0, 0, 0,
+                           SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)
+        except Exception as e:
+            log_debug(f"ensure colorkey notice: {e}")
+
     def _apply_windows_transparency(self, x: int, y: int):
         try:
             hwnd = pygame.display.get_wm_info().get('window')
@@ -707,13 +861,7 @@ class PhoenixDynamicIslandOverlay:
                            SWP_SHOWWINDOW)
             
             # Layered colorkey transparency for RGB(1, 1, 1)
-            GWL_EXSTYLE = -20
-            WS_EX_LAYERED = 0x00080000
-            LWA_COLORKEY = 0x00000001
-            style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED)
-            COLORKEY = 0x00010101
-            user32.SetLayeredWindowAttributes(hwnd, COLORKEY, 0, LWA_COLORKEY)
+            self._ensure_colorkey(hwnd)
             log_debug("Applied Windows HWND_TOPMOST and Layered colorkey transparency.")
         except Exception as e:
             log_debug(f"Transparency notice: {e}")
@@ -730,6 +878,11 @@ class PhoenixDynamicIslandOverlay:
             return None
 
     def set_click_through(self, enabled: bool) -> bool:
+        """Thread-safe queue: dispatches to main loop so it never races with rendering."""
+        self.msg_queue.put(("CLICK_THROUGH", bool(enabled)))
+        return True
+
+    def _apply_click_through(self, enabled: bool) -> bool:
         """WS_EX_TRANSPARENT: the mouse falls through the island to whatever is
         behind it, so the bot can click objects the capsule overlaps (a search
         icon at the top of the screen, for one).  Off again when it is idle, so
@@ -740,13 +893,22 @@ class PhoenixDynamicIslandOverlay:
             return False
         try:
             user32 = ctypes.windll.user32
-            GWL_EXSTYLE, WS_EX_TRANSPARENT = -20, 0x00000020
+            GWL_EXSTYLE, WS_EX_TRANSPARENT, WS_EX_LAYERED = -20, 0x00000020, 0x00080000
+            LWA_COLORKEY = 0x00000001
+            COLORKEY = 0x00010101
             style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
             new = (style | WS_EX_TRANSPARENT) if enabled else (style & ~WS_EX_TRANSPARENT)
-            if new == style:
-                return self.click_through == bool(enabled)
+            new |= WS_EX_LAYERED
             user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new)
+            user32.SetLayeredWindowAttributes(hwnd, COLORKEY, 0, LWA_COLORKEY)
             self.click_through = bool(enabled)
+            SWP_NOMOVE = 0x0002
+            SWP_NOSIZE = 0x0001
+            SWP_NOZORDER = 0x0004
+            SWP_NOACTIVATE = 0x0010
+            SWP_FRAMECHANGED = 0x0020
+            set_window_pos(hwnd, 0, 0, 0, 0,
+                           SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)
             log_debug(f"Click-through {'ON' if enabled else 'OFF'} - the bot is "
                       f"{'working' if enabled else 'idle'}.")
             return True
@@ -787,6 +949,7 @@ class PhoenixDynamicIslandOverlay:
         self._scan_is_hidden = False
         try:
             ctypes.windll.user32.ShowWindow(self._hwnd(), 4)  # SW_SHOWNOACTIVATE
+            self._ensure_colorkey()
             return True
         except Exception as e:
             log_debug(f"scan-show notice: {e}")
@@ -796,6 +959,7 @@ class PhoenixDynamicIslandOverlay:
         while not self.msg_queue.empty():
             kind, data = self.msg_queue.get_nowait()
             if kind == "STATE":
+                prev_state = self.state
                 self.state = data
                 if data in ("working", "thinking", "acting"):
                     self.target_width = 720.0
@@ -816,8 +980,10 @@ class PhoenixDynamicIslandOverlay:
                     self.emotion = "happy"
                     self.target_width = 540.0
                     self.target_height = 76.0
+                    self.target_radius = 28.0
                 elif data == "stalled":
                     self.emotion = "error"
+                self._apply_framer_motion_state_transition(prev_state, data)
             elif kind == "EMOTION":
                 self.emotion = data
             elif kind == "ACTION":
@@ -826,12 +992,16 @@ class PhoenixDynamicIslandOverlay:
                 self.current_step = step
                 self.target_width = 720.0
                 self.target_height = 294.0   # room for the 120 px chat panel
+                self.target_radius = 30.0
+                self._apply_framer_motion_state_transition(self.state, "acting")
             elif kind == "THOUGHT":
                 self.current_thought = self._clean_ui_text(data)
             elif kind == "SPEECH":
                 self.current_speech = self._clean_ui_text(data)
             elif kind == "APP":
                 self.current_app = data
+            elif kind == "CLICK_THROUGH":
+                self._apply_click_through(data)
 
     def _handle_input_events(self):
         for event in pygame.event.get():
@@ -1101,10 +1271,17 @@ class PhoenixDynamicIslandOverlay:
 
     def _update(self, dt: float):
         self._update_avatar(dt)
-        speed = 14.0 * dt
-        self.current_width += (self.target_width - self.current_width) * min(1.0, speed)
-        self.current_height += (self.target_height - self.current_height) * min(1.0, speed)
-        self.current_radius += (self.target_radius - self.current_radius) * min(1.0, speed)
+        # Framer Motion spring physics animations for smooth Dynamic Island resizing
+        if self.spring_width.target != self.target_width:
+            self.spring_width.set_target(self.target_width)
+        if self.spring_height.target != self.target_height:
+            self.spring_height.set_target(self.target_height)
+        if self.spring_radius.target != self.target_radius:
+            self.spring_radius.set_target(self.target_radius)
+
+        self.current_width = self.spring_width.update(dt)
+        self.current_height = self.spring_height.update(dt)
+        self.current_radius = self.spring_radius.update(dt)
         # the window follows the capsule, never the other way round
         self._sync_window()
         
@@ -1208,12 +1385,9 @@ class PhoenixDynamicIslandOverlay:
         if IS_WINDOWS:
             if self.use_moderngl:
                 self.ctx.clear(1.0/255.0, 1.0/255.0, 1.0/255.0, 0.0)
-            # (1,1,1) is the colorkey, so it is a hole either way.  It must
-            # be alpha 0 when per-pixel alpha is live: an opaque backdrop
-            # is not punched out by a colorkey, it would turn the whole
-            # window into one translucent slab instead of a capsule.
-            self.ui_surface.fill((1, 1, 1, 0) if self._per_pixel_alpha
-                                 else (1, 1, 1, 255))
+            # RGB(1,1,1) is the Windows layered colorkey. Fill with alpha 255 so ModernGL
+            # writes solid (1,1,1) pixels to the framebuffer, completely keyed out by Windows.
+            self.ui_surface.fill((1, 1, 1, 255))
         else:
             if self.use_moderngl:
                 self.ctx.clear(0.0, 0.0, 0.0, 0.0)
@@ -1222,10 +1396,9 @@ class PhoenixDynamicIslandOverlay:
         # 2. ModernGL Starfield Shader inside island capsule
         if self.use_moderngl:
             island_left = (self.win_w - self.current_width) / 2.0
-            # The capsule is drawn at y=0, so its bottom edge is its own
-            # height - not screen_height - height, which describes a capsule
-            # pinned to the bottom of the window.
-            island_bottom = float(self.current_height)
+            # In OpenGL texture/screen coords, Y=0 is bottom and Y=screen_height is top.
+            # The island is pinned to the top of the screen (0 to current_height in Pygame).
+            island_bottom = max(0.0, float(self.screen_height - self.current_height))
             try:
                 self.prog_starfield['u_resolution'].value = (self.screen_width, self.screen_height)
                 self.prog_starfield['u_time'].value = float(current_time)
@@ -3059,11 +3232,7 @@ class PhoenixDynamicIslandOverlay:
             hwnd = hwnd or self._hwnd()
             if not hwnd:
                 return False
-            user32 = ctypes.windll.user32
-            GWL_EXSTYLE, WS_EX_LAYED, LWA_COLORKEY = -20, 0x00080000, 0x1
-            style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYED)
-            user32.SetLayeredWindowAttributes(hwnd, 0x00010101, 0, LWA_COLORKEY)
+            self._ensure_colorkey(hwnd)
             self._per_pixel_alpha = False
             self._alpha_applied = True
             return True
@@ -3656,9 +3825,11 @@ class PhoenixDynamicIslandOverlay:
                 self.target_width = 720.0
                 self.target_height = 470.0
                 self.target_radius = 30.0
+                self._apply_framer_motion_state_transition("thinking", "acting")
         else:
             if not self.expanded_open and not self.file_anim_progress:
                 self.target_height = 294.0
+                self._apply_framer_motion_state_transition("acting", "thinking")
         return self.thoughts_open
 
     def _scroll_thoughts(self, delta: float):

@@ -4,3 +4,27 @@ __pycache__/
 memory.json
 rag_index.json
 transcripts/
+
+# Web App Files & Assets
+src/
+index.html
+
+# Web Build Outputs & Cache
+dist/
+build/
+.vite/
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Web Dependencies & Package Managers
+node_modules/
+package.json
+package-lock.json
+bun.lock
+yarn.lock
+pnpm-lock.yaml
+
+# Web Configs & Tooling
+vite.config.ts
+tsconfig.json
+metadata.json
