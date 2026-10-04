@@ -1,0 +1,12 @@
+opencv-python
+faster-whisper
+SpeechRecognition
+pyaudio
+pyttsx3
+transformers==4.40.1
+tokenizers==0.19.1
+torch
+Pillow
+mss
+wikipedia
+winrt-Windows.UI.Notifications

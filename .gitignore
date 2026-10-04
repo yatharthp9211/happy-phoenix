@@ -1,0 +1,6 @@
+__pycache__/
+*.log
+*.npy
+memory.json
+rag_index.json
+transcripts/
