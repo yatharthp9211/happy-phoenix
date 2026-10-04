@@ -180,15 +180,43 @@ class PhoenixControl:
         self._style(ttk)
 
         root = self.root
-        root.title("Phoenix")
+        root.title("Phoenix Control Hub")
         root.configure(bg=BG)
         root.geometry(self._window_geometry())
-        root.minsize(760, 520)
+        root.minsize(800, 560)
+
+        # Sleek Top Header Bar with Live Branding & Telemetry Chips
+        header = tk.Frame(root, bg=BG)
+        header.pack(fill="x", padx=14, pady=(10, 2))
+
+        brand_frame = tk.Frame(header, bg=BG)
+        brand_frame.pack(side="left")
+        tk.Label(brand_frame, text="✦ PHOENIX", bg=BG, fg="#4fa3ff",
+                 font=(FONT, 12, "bold")).pack(side="left")
+        tk.Label(brand_frame, text="CONTROL HUB", bg=BG, fg=TEXT,
+                 font=(FONT, 12, "bold")).pack(side="left", padx=(4, 8))
+        tk.Label(brand_frame, text="MK4/MK8", bg=CARD, fg=MUTED,
+                 font=(FONT, 8, "bold"), padx=6, pady=1).pack(side="left")
+
+        status_frame = tk.Frame(header, bg=BG)
+        status_frame.pack(side="right")
+        self.island_status_badge = tk.Label(status_frame,
+                                            text="🟢 Island Linked" if self.island else "⚪ Standalone Mode",
+                                            bg=CARD, fg="#38ef7d" if self.island else MUTED,
+                                            font=(FONT, 8, "bold"), padx=8, pady=2)
+        self.island_status_badge.pack(side="right", padx=4)
+
+        active_m = self.store.active_mascot()
+        self.active_mascot_badge = tk.Label(status_frame,
+                                            text=f"🎭 {active_m.get('name', 'Mascot')}",
+                                            bg=CARD, fg=TEXT, font=(FONT, 8), padx=8, pady=2)
+        self.active_mascot_badge.pack(side="right", padx=4)
 
         self.nb = ttk.Notebook(root)
-        self.nb.pack(fill="both", expand=True, padx=10, pady=(10, 0))
+        self.nb.pack(fill="both", expand=True, padx=10, pady=(6, 0))
         self._build_mascots_tab(self.nb)
         self._build_models_tab(self.nb)
+        self._build_quick_island_tab(self.nb)
         self._build_settings_tab(self.nb)
         self._build_logs_tab(self.nb)
 
@@ -295,16 +323,16 @@ class PhoenixControl:
             s.configure("Phoenix.TFrame", background=BG)
             s.configure("Card.TFrame", background=CARD)
             s.configure("TNotebook", background=BG, borderwidth=0)
-            s.configure("TNotebook.Tab", background=PANEL, foreground=TEXT,
-                        padding=(16, 8))
+            s.configure("TNotebook.Tab", background=PANEL, foreground=MUTED,
+                        padding=(18, 9), font=(FONT, 9, "bold"))
             s.map("TNotebook.Tab",
-                  background=[("selected", CARD_ON)],
-                  foreground=[("selected", TEXT)])
-            s.configure("TLabelframe", background=BG, borderwidth=0)
-            s.configure("TLabelframe.Label", background=BG, foreground=MUTED)
+                  background=[("selected", CARD_ON), ("active", CARD)],
+                  foreground=[("selected", "#4fa3ff"), ("active", TEXT)])
+            s.configure("TLabelframe", background=PANEL, borderwidth=1, relief="solid")
+            s.configure("TLabelframe.Label", background=PANEL, foreground="#4fa3ff", font=(FONT, 9, "bold"))
             s.configure("TLabel", background=BG, foreground=TEXT)
             s.configure("TCheckbutton", background=BG, foreground=TEXT)
-            s.configure("TButton", background=PANEL, foreground=TEXT)
+            s.configure("TButton", background=PANEL, foreground=TEXT, font=(FONT, 9))
             s.map("TButton", background=[("active", CARD_ON)])
             s.configure("TEntry", fieldbackground=PANEL, foreground=TEXT)
             s.configure("TCombobox", fieldbackground=PANEL, foreground=TEXT)
@@ -406,6 +434,28 @@ class PhoenixControl:
             if self._since_log >= 0.25:
                 self._since_log = 0.0
                 self.poll_logs()
+
+            # update live Dynamic Island telemetry display at 4 Hz
+            self._since_telemetry = getattr(self, "_since_telemetry", 0.0) + self._pump_interval
+            if self._since_telemetry >= 0.25:
+                self._since_telemetry = 0.0
+                if getattr(self, "telemetry_label", None) and self.island is not None:
+                    try:
+                        w = getattr(self.island, "current_width", 540.0)
+                        h = getattr(self.island, "current_height", 76.0)
+                        tw = getattr(self.island, "target_width", 540.0)
+                        th = getattr(self.island, "target_height", 76.0)
+                        st = getattr(self.island, "state", "idle")
+                        em = getattr(self.island, "emotion", "idle")
+                        sp = getattr(self.island, "current_speech", "")
+                        self.telemetry_label.configure(
+                            text=f"Capsule Dimensions: {w:.1f} x {h:.1f} px  (Target: {tw:.0f} x {th:.0f})\n"
+                                 f"Assistant State:    [{st.upper()}]  |  Avatar Emotion: [{em.upper()}]\n"
+                                 f"Active Speech Line: {sp[:60] if sp else '(none)'}\n"
+                                 f"Physics Solver:     Framer Motion Damped Harmonic Spring (k=180-220, c=22-26)"
+                        )
+                    except Exception:
+                        pass
         except Exception as exc:
             log(f"pump: {exc}")
             # A broken Tk loop must not take 60 fps of island with it.
@@ -478,23 +528,26 @@ class PhoenixControl:
     def _build_mascots_tab(self, parent):
         tk = self.tk
         page = tk.Frame(parent, bg=BG)
-        parent.add(page, text="Mascots")
+        parent.add(page, text="🎭 Mascots")
 
         left = tk.Frame(page, bg=BG)
         left.pack(side="left", fill="both", expand=True, padx=(0, 10), pady=10)
         bar = tk.Frame(left, bg=BG)
         bar.pack(fill="x", pady=(0, 6))
-        tk.Label(bar, text="Gallery", bg=BG, fg=MUTED,
-                 font=(FONT, 9, "bold")).pack(side="left")
-        tk.Button(bar, text="Add", width=7, command=self.add_mascot,
+        tk.Label(bar, text="Mascot Gallery", bg=BG, fg=TEXT,
+                 font=(FONT, 10, "bold")).pack(side="left")
+        tk.Button(bar, text="Add", width=6, command=self.add_mascot,
                   bg=CARD, fg=TEXT, activebackground=CARD_ON,
-                  relief="flat", bd=0).pack(side="right", padx=3)
-        tk.Button(bar, text="Duplicate", width=10, command=self.duplicate_mascot,
+                  relief="flat", bd=0).pack(side="right", padx=2)
+        tk.Button(bar, text="Duplicate", width=9, command=self.duplicate_mascot,
                   bg=CARD, fg=TEXT, activebackground=CARD_ON,
-                  relief="flat", bd=0).pack(side="right", padx=3)
-        tk.Button(bar, text="Delete", width=8, command=self.delete_mascot,
+                  relief="flat", bd=0).pack(side="right", padx=2)
+        tk.Button(bar, text="Delete", width=7, command=self.delete_mascot,
                   bg=CARD, fg=TEXT, activebackground=CARD_ON,
-                  relief="flat", bd=0).pack(side="right", padx=3)
+                  relief="flat", bd=0).pack(side="right", padx=2)
+        tk.Button(bar, text="🎲 Random", width=9, command=self.random_mascot,
+                  bg=CARD, fg="#4fa3ff", activebackground=CARD_ON,
+                  relief="flat", bd=0, font=(FONT, 8, "bold")).pack(side="right", padx=2)
 
         holder = tk.Frame(left, bg=BG)
         holder.pack(fill="both", expand=True)
@@ -637,23 +690,27 @@ class PhoenixControl:
         picked = m["key"] == self.selected
         bg = CARD_ON if picked else CARD
         rect = (x, y, w, h)
-        cv.create_rectangle(x, y, x + w, y + h, fill=bg, outline=ACCENT if picked else EDGE,
-                            width=2 if picked else 1)
+        border_col = "#4fa3ff" if picked else ("#38ef7d" if active else EDGE)
+        cv.create_rectangle(x, y, x + w, y + h, fill=bg, outline=border_col,
+                            width=2 if (picked or active) else 1)
         tag = f"card{index}"
         cv.create_rectangle(x, y, x + w, y + h, outline="", fill="", tags=tag)
-        cx, cy = x + 40, y + h // 2
+        cx, cy = x + 38, y + h // 2
         self._draw_shape(cv, m, cx, cy, 26)
         label = m["name"]
-        if active:
-            label = "* " + label
-        cv.create_text(x + 74, y + 30, anchor="w", text=label, fill=TEXT,
+        cv.create_text(x + 72, y + 26, anchor="w", text=label, fill=TEXT,
                        font=(FONT, 10, "bold"), tags=tag)
-        cv.create_text(x + 74, y + 52, anchor="w",
+        cv.create_text(x + 72, y + 48, anchor="w",
                        text=PERSONALITIES.get(m["personality"], "Normal"),
                        fill=MUTED, font=(FONT, 9), tags=tag)
-        cv.create_text(x + 74, y + 72, anchor="w",
-                       text=f"{m['shape']}  -  {int(round(float(m['size']) * 100))}%",
-                       fill=MUTED, font=(FONT, 8), tags=tag)
+        cv.create_text(x + 72, y + 70, anchor="w",
+                       text=f"{m['shape'].upper()} · {int(round(float(m['size']) * 100))}%",
+                       fill="#7c8ba1", font=(FONT, 8), tags=tag)
+        if active:
+            cv.create_rectangle(x + w - 66, y + 8, x + w - 8, y + 24,
+                                fill="#153625", outline="#38ef7d", width=1, tags=tag)
+            cv.create_text(x + w - 37, y + 16, text="ACTIVE", fill="#38ef7d",
+                           font=(FONT, 7, "bold"), tags=tag)
         self.cards.append(MascotCard(m["key"], (x, y, x + w, y + h), tag))
 
     def _draw_shape(self, cv, m, cx, cy, r):
@@ -827,6 +884,26 @@ class PhoenixControl:
         self.refresh_customise()
         self._say(f"added {base}")
 
+    def random_mascot(self):
+        import random
+        names = ["Aero", "Pulse", "Nexus", "Pixel", "Cosmo", "Spark", "Vibe", "Echo", "Blaze", "Zen", "Nova", "Flux"]
+        name = f"{random.choice(names)}-{random.randint(1, 99)}"
+        key = self.store.unique_key(name)
+        pers = random.choice(list(PERSONALITIES))
+        shape = random.choice(list(SHAPES))
+        head = random.choice(PALETTE)
+        accent = random.choice(ACCENTS)
+        emoji = random.choice(EMOJI) if shape == "emoji" else ""
+        size = round(random.uniform(0.85, 1.25), 2)
+        new = dict(key=key, name=name, personality=pers, head=head, accent=accent,
+                   shape=shape, emoji=emoji, size=size)
+        self.store.upsert(new)
+        self.selected = key
+        self.persist()
+        self.redraw_gallery()
+        self.refresh_customise()
+        self._say(f"Generated random mascot: {name}")
+
     def duplicate_mascot(self):
         src = self.selected_mascot()
         key = self.store.unique_key(src["name"])
@@ -863,20 +940,20 @@ class PhoenixControl:
     def _build_models_tab(self, parent):
         tk, ttk = self.tk, self.ttk
         page = tk.Frame(parent, bg=BG)
-        parent.add(page, text="Models")
+        parent.add(page, text="🧠 Models")
 
         top = tk.Frame(page, bg=BG)
         top.pack(fill="both", expand=True, padx=10, pady=10)
         bar = tk.Frame(top, bg=BG)
         bar.pack(fill="x", pady=(0, 6))
-        tk.Label(bar, text="GGUF files on this machine", bg=BG, fg=MUTED,
-                 font=(FONT, 9, "bold")).pack(side="left")
-        tk.Button(bar, text="Rescan", width=9, command=self.rescan_models,
+        tk.Label(bar, text="GGUF Vision & LLM Models", bg=BG, fg=TEXT,
+                 font=(FONT, 10, "bold")).pack(side="left")
+        tk.Button(bar, text="Rescan", width=8, command=self.rescan_models,
                   bg=CARD, fg=TEXT, activebackground=CARD_ON,
                   relief="flat", bd=0).pack(side="right", padx=3)
-        tk.Button(bar, text="Use selected", width=13, command=self.use_model,
+        tk.Button(bar, text="Use Selected", width=12, command=self.use_model,
                   bg="#2d5f9e", fg=TEXT, activebackground="#3a7ac9",
-                  relief="flat", bd=0).pack(side="right", padx=3)
+                  relief="flat", bd=0, font=(FONT, 9, "bold")).pack(side="right", padx=3)
 
         holder = tk.Frame(top, bg=BG)
         holder.pack(fill="both", expand=True)
@@ -895,30 +972,45 @@ class PhoenixControl:
                                      font=(FONT, 9), text="")
         self.model_status.pack(fill="x", padx=10)
 
-        dl = tk.LabelFrame(page, text="Download from Hugging Face",
-                           bg=PANEL, fg=MUTED)
-        dl.pack(fill="x", padx=10, pady=(10, 10))
+        dl = tk.LabelFrame(page, text=" Download from Hugging Face Hub ",
+                           bg=PANEL, fg="#4fa3ff", font=(FONT, 9, "bold"))
+        dl.pack(fill="x", padx=10, pady=(6, 10))
+
+        # Quick Model Presets
+        presets_bar = tk.Frame(dl, bg=PANEL)
+        presets_bar.pack(fill="x", padx=8, pady=(6, 4))
+        tk.Label(presets_bar, text="Quick Presets:", bg=PANEL, fg=MUTED, font=(FONT, 8, "bold")).pack(side="left", padx=(0, 6))
+        for p_name, p_repo, p_file in [
+            ("Qwen3-VL 4B", "Qwen/Qwen3-VL-4B-Instruct-GGUF", "qwen3-vl-4b-instruct-q4_k_m.gguf"),
+            ("Qwen2.5-Coder 7B", "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF", "qwen2.5-coder-7b-instruct-q4_k_m.gguf"),
+            ("Llama-3.2 3B", "bartowski/Llama-3.2-3B-Instruct-GGUF", "Llama-3.2-3B-Instruct-Q4_K_M.gguf"),
+            ("DeepSeek R1 7B", "unsloth/DeepSeek-R1-Distill-Qwen-7B-GGUF", "DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf")
+        ]:
+            tk.Button(presets_bar, text=p_name, font=(FONT, 8),
+                      command=lambda r=p_repo, f=p_file: (self.repo_var.set(r), self.file_var.set(f)),
+                      bg=CARD, fg=TEXT, activebackground=CARD_ON, relief="flat", bd=0, padx=6, pady=1).pack(side="left", padx=2)
+
         r1 = tk.Frame(dl, bg=PANEL)
-        r1.pack(fill="x", padx=8, pady=(8, 2))
+        r1.pack(fill="x", padx=8, pady=(4, 2))
         tk.Label(r1, text="repo", bg=PANEL, fg=MUTED, width=6,
                  anchor="w", font=(FONT, 9)).pack(side="left")
         self.repo_var = tk.StringVar(value="Qwen/Qwen3-VL-4B-Instruct-GGUF")
-        tk.Entry(r1, textvariable=self.repo_var, bg=PANEL, fg=TEXT,
+        tk.Entry(r1, textvariable=self.repo_var, bg=CARD, fg=TEXT,
                  insertbackground=TEXT, relief="flat",
                  highlightthickness=1, highlightbackground=EDGE).pack(
                      side="left", fill="x", expand=True, ipady=3)
         r2 = tk.Frame(dl, bg=PANEL)
-        r2.pack(fill="x", padx=8, pady=(2, 8))
+        r2.pack(fill="x", padx=8, pady=(2, 6))
         tk.Label(r2, text="file", bg=PANEL, fg=MUTED, width=6,
                  anchor="w", font=(FONT, 9)).pack(side="left")
         self.file_var = tk.StringVar()
-        tk.Entry(r2, textvariable=self.file_var, bg=PANEL, fg=TEXT,
+        tk.Entry(r2, textvariable=self.file_var, bg=CARD, fg=TEXT,
                  insertbackground=TEXT, relief="flat",
                  highlightthickness=1, highlightbackground=EDGE).pack(
                      side="left", fill="x", expand=True, ipady=3)
-        tk.Button(r2, text="Download", width=10, command=self.start_download,
-                  bg=CARD, fg=TEXT, activebackground=CARD_ON,
-                  relief="flat", bd=0).pack(side="left", padx=(8, 0))
+        tk.Button(r2, text="Download", width=11, command=self.start_download,
+                  bg="#2d5f9e", fg=TEXT, activebackground="#3a7ac9",
+                  relief="flat", bd=0, font=(FONT, 9, "bold")).pack(side="left", padx=(8, 0))
         self.download_list = tk.Label(dl, bg=PANEL, fg=MUTED, anchor="w",
                                       justify="left", font=(FONT, 9),
                                       text="no downloads yet")
@@ -1019,12 +1111,156 @@ class PhoenixControl:
             log(f"downloads: {exc}")
 
     # ------------------------------------------------------------------
+    # Live Controls tab (Dynamic Island Driver & Spring Physics Tester)
+    # ------------------------------------------------------------------
+    def _build_quick_island_tab(self, parent):
+        tk = self.tk
+        page = tk.Frame(parent, bg=BG)
+        parent.add(page, text="⚡ Live Controls")
+
+        container = tk.Frame(page, bg=BG)
+        container.pack(fill="both", expand=True, padx=16, pady=12)
+
+        # 1. Island State Transitions & Spring Resizing Driver
+        card1 = tk.LabelFrame(container, text=" Dynamic Island State Driver (Framer Motion Spring Physics) ",
+                              bg=PANEL, fg="#4fa3ff", font=(FONT, 10, "bold"), bd=1, relief="solid")
+        card1.pack(fill="x", pady=(0, 10), ipady=6, padx=4)
+
+        tk.Label(card1, text="Test live spring resizing and visual card expansions directly on the Dynamic Island HUD:",
+                 bg=PANEL, fg=MUTED, font=(FONT, 9)).pack(anchor="w", padx=12, pady=(4, 6))
+
+        btn_row = tk.Frame(card1, bg=PANEL)
+        btn_row.pack(fill="x", padx=10, pady=4)
+
+        tk.Button(btn_row, text="🟢 Idle / Waiting (540x76)",
+                  command=lambda: self._test_island_state("waiting"),
+                  bg="#173323", fg="#38ef7d", activebackground="#204731",
+                  relief="flat", bd=0, font=(FONT, 9, "bold"), padx=8, pady=3).pack(side="left", padx=3)
+
+        tk.Button(btn_row, text="🧠 Thinking Expand (720x294)",
+                  command=lambda: self._test_island_state("thinking"),
+                  bg="#172b4d", fg="#4fa3ff", activebackground="#1f3b6a",
+                  relief="flat", bd=0, font=(FONT, 9, "bold"), padx=8, pady=3).pack(side="left", padx=3)
+
+        tk.Button(btn_row, text="⚡ Acting Action Card",
+                  command=lambda: self._test_island_state("acting"),
+                  bg="#2a2245", fg="#d4a5ff", activebackground="#3a2f60",
+                  relief="flat", bd=0, font=(FONT, 9, "bold"), padx=8, pady=3).pack(side="left", padx=3)
+
+        tk.Button(btn_row, text="📖 Thoughts Fold/Unfold (720x470)",
+                  command=self._test_toggle_thoughts,
+                  bg=CARD, fg=TEXT, activebackground=CARD_ON,
+                  relief="flat", bd=0, font=(FONT, 9), padx=8, pady=3).pack(side="left", padx=3)
+
+        tk.Button(btn_row, text="💫 Poke Dizzy",
+                  command=lambda: self._test_island_emotion("dizzy"),
+                  bg=CARD, fg="#ffb3ba", activebackground=CARD_ON,
+                  relief="flat", bd=0, font=(FONT, 9), padx=8, pady=3).pack(side="left", padx=3)
+
+        # 2. Desktop Task Prompt Dispatcher
+        card2 = tk.LabelFrame(container, text=" Task Command Dispatcher ",
+                              bg=PANEL, fg="#4fa3ff", font=(FONT, 10, "bold"), bd=1, relief="solid")
+        card2.pack(fill="x", pady=(0, 10), ipady=6, padx=4)
+
+        disp_frame = tk.Frame(card2, bg=PANEL)
+        disp_frame.pack(fill="x", padx=12, pady=(6, 6))
+
+        tk.Label(disp_frame, text="Task Prompt:", bg=PANEL, fg=TEXT, font=(FONT, 9, "bold")).pack(side="left", padx=(0, 8))
+        self.cmd_var = tk.StringVar(value="analyze screen and check active windows")
+        e_cmd = tk.Entry(disp_frame, textvariable=self.cmd_var, bg=CARD, fg=TEXT,
+                         insertbackground=TEXT, relief="flat", highlightthickness=1,
+                         highlightbackground=EDGE, highlightcolor=ACCENT, font=(FONT, 10))
+        e_cmd.pack(side="left", fill="x", expand=True, ipady=4, padx=(0, 8))
+        e_cmd.bind("<Return>", lambda _e: self._dispatch_task_prompt())
+
+        tk.Button(disp_frame, text="🚀 Dispatch to Phoenix", command=self._dispatch_task_prompt,
+                  bg="#2d5f9e", fg=TEXT, activebackground="#3a7ac9", relief="flat", bd=0,
+                  font=(FONT, 9, "bold"), padx=12, pady=4).pack(side="left")
+
+        preset_row = tk.Frame(card2, bg=PANEL)
+        preset_row.pack(fill="x", padx=12, pady=(0, 6))
+        tk.Label(preset_row, text="Quick tasks:", bg=PANEL, fg=MUTED, font=(FONT, 8)).pack(side="left", padx=(0, 6))
+        for p_label, p_text in [
+            ("Browse Chrome", "open google chrome and search latest tech news"),
+            ("Play Spotify", "play jazz music on spotify"),
+            ("Terminal Status", "open terminal and check git status"),
+            ("VS Code Project", "open current project folder in vscode")
+        ]:
+            tk.Button(preset_row, text=p_label, font=(FONT, 8),
+                      command=lambda t=p_text: (self.cmd_var.set(t), self._dispatch_task_prompt()),
+                      bg=CARD, fg=MUTED, activebackground=CARD_ON, activeforeground=TEXT,
+                      relief="flat", bd=0, padx=6, pady=1).pack(side="left", padx=2)
+
+        # 3. Live Telemetry
+        card3 = tk.LabelFrame(container, text=" Live Dynamic Island Telemetry & Diagnostics ",
+                              bg=PANEL, fg="#4fa3ff", font=(FONT, 10, "bold"), bd=1, relief="solid")
+        card3.pack(fill="both", expand=True, ipady=6, padx=4)
+
+        self.telemetry_label = tk.Label(card3, text="Monitoring Dynamic Island metrics...",
+                                        bg=PANEL, fg=TEXT, font=("Consolas", 9), justify="left", anchor="nw")
+        self.telemetry_label.pack(fill="both", expand=True, padx=12, pady=6)
+
+    def _test_island_state(self, state: str):
+        if self.island is None:
+            self._say("Island overlay not attached (standalone)", bad=True)
+            return
+        try:
+            self.island.set_state(state)
+            if state == "thinking":
+                self.island.set_thought("Testing reasoning step with Framer Motion spring expansion...")
+            elif state == "acting":
+                self.island.set_action("EXECUTING TEST AUTOMATION STEP", 1)
+            elif state == "waiting":
+                self.island.set_speech("")
+            self._say(f"Island state set to: {state}")
+        except Exception as e:
+            log(f"test state error: {e}")
+
+    def _test_island_emotion(self, emotion: str):
+        if self.island is None:
+            self._say("Island overlay not attached", bad=True)
+            return
+        try:
+            self.island.set_emotion(emotion)
+            self._say(f"Mascot emotion set to: {emotion}")
+        except Exception as e:
+            log(f"test emotion error: {e}")
+
+    def _test_toggle_thoughts(self):
+        if self.island is None:
+            self._say("Island overlay not attached", bad=True)
+            return
+        try:
+            opened = self.island.toggle_thoughts()
+            self._say(f"Reasoning dropdown: {'Unfolded' if opened else 'Folded'}")
+        except Exception as e:
+            log(f"toggle thoughts error: {e}")
+
+    def _dispatch_task_prompt(self):
+        text = (self.cmd_var.get() if self.cmd_var else "").strip()
+        if not text:
+            return
+        if self.island is None:
+            self._say("Island overlay not attached (standalone)", bad=True)
+            return
+        try:
+            if callable(getattr(self.island, "on_user_input", None)):
+                self.island.on_user_input(text)
+                self._say(f"Dispatched task: '{text[:28]}...'")
+            else:
+                self.island.set_state("thinking")
+                self.island.set_thought(f"Processing prompt: {text}")
+                self._say("Simulated task run on island")
+        except Exception as e:
+            log(f"dispatch error: {e}")
+
+    # ------------------------------------------------------------------
     # Settings tab
     # ------------------------------------------------------------------
     def _build_settings_tab(self, parent):
         tk, ttk = self.tk, self.ttk
         page = tk.Frame(parent, bg=BG)
-        parent.add(page, text="Settings")
+        parent.add(page, text="⚙️ Settings")
 
         isl = self.island
         box = tk.Frame(page, bg=BG)
@@ -1170,7 +1406,7 @@ class PhoenixControl:
         """
         tk = self.tk
         page = tk.Frame(parent, bg=BG)
-        parent.add(page, text="Logs")
+        parent.add(page, text="📜 Logs")
 
         top = tk.Frame(page, bg=BG)
         top.pack(fill="x", padx=12, pady=(12, 8))
@@ -1189,12 +1425,15 @@ class PhoenixControl:
                        command=self.refresh_logs, bg=BG, fg=TEXT,
                        selectcolor=BG, activebackground=BG,
                        activeforeground=TEXT, font=(FONT, 9)).pack(side="left", padx=6)
-        tk.Button(top, text="Reread", width=9, command=self.reread_log,
+        tk.Button(top, text="Reread", width=8, command=self.reread_log,
                   bg=CARD, fg=TEXT, activebackground=CARD_ON,
-                  relief="flat", bd=0).pack(side="left", padx=3)
-        tk.Button(top, text="Open file", width=11, command=self.open_log_file,
+                  relief="flat", bd=0).pack(side="left", padx=2)
+        tk.Button(top, text="Open file", width=9, command=self.open_log_file,
                   bg=CARD, fg=TEXT, activebackground=CARD_ON,
-                  relief="flat", bd=0).pack(side="left", padx=3)
+                  relief="flat", bd=0).pack(side="left", padx=2)
+        tk.Button(top, text="Copy All", width=8, command=self.copy_logs_to_clipboard,
+                  bg=CARD, fg="#4fa3ff", activebackground=CARD_ON,
+                  relief="flat", bd=0, font=(FONT, 8, "bold")).pack(side="left", padx=2)
 
         filt = tk.Frame(page, bg=BG)
         filt.pack(fill="x", padx=12)
@@ -1235,6 +1474,18 @@ class PhoenixControl:
 
         self.tails = {k: LogTail(p) for k, _l, p, _b in SOURCES}
         self.show_log(self.log_key)
+
+    def copy_logs_to_clipboard(self):
+        """Copy the currently rendered log output to system clipboard."""
+        if self.log_text is None or self.root is None:
+            return
+        try:
+            content = self.log_text.get("1.0", "end-1c")
+            self.root.clipboard_clear()
+            self.root.clipboard_append(content)
+            self._say("Copied log lines to clipboard")
+        except Exception as exc:
+            log(f"copy logs error: {exc}")
 
     def show_log(self, key):
         if key not in self.tails:
@@ -1424,6 +1675,14 @@ class PhoenixControl:
         try:
             if not self.store.get(self.selected):
                 self.selected = self.store.active
+            if getattr(self, "active_mascot_badge", None):
+                active_m = self.store.active_mascot()
+                self.active_mascot_badge.configure(text=f"🎭 {active_m.get('name', 'Mascot')}")
+            if getattr(self, "island_status_badge", None):
+                self.island_status_badge.configure(
+                    text="🟢 Island Linked" if self.island else "⚪ Standalone Mode",
+                    fg="#38ef7d" if self.island else MUTED
+                )
             self._refresh_glass_widgets()
             self.redraw_gallery()
             self.refresh_customise()
