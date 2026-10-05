@@ -88,6 +88,34 @@ def log(msg: str):
         pass
 
 
+def draw_curved_rect(canvas, x1, y1, x2, y2, r=12, **kwargs):
+    """Draw a smooth curved rounded rectangle on a Tkinter canvas."""
+    r = max(2, min(r, int(abs(x2 - x1)) // 2, int(abs(y2 - y1)) // 2))
+    points = [
+        x1 + r, y1,
+        x1 + r, y1,
+        x2 - r, y1,
+        x2 - r, y1,
+        x2, y1,
+        x2, y1 + r,
+        x2, y1 + r,
+        x2, y2 - r,
+        x2, y2 - r,
+        x2, y2,
+        x2 - r, y2,
+        x2 - r, y2,
+        x1 + r, y2,
+        x1 + r, y2,
+        x1, y2,
+        x1, y2 - r,
+        x1, y2 - r,
+        x1, y1 + r,
+        x1, y1 + r,
+        x1, y1
+    ]
+    return canvas.create_polygon(points, smooth=True, **kwargs)
+
+
 class MascotCard:
     """One entry in the gallery.  Just data + the geometry it was drawn at,
     so a click can be turned back into a mascot key."""
@@ -322,26 +350,29 @@ class PhoenixControl:
                 pass
             s.configure("Phoenix.TFrame", background=BG)
             s.configure("Card.TFrame", background=CARD)
-            s.configure("TNotebook", background=BG, borderwidth=0)
-            s.configure("TNotebook.Tab", background=PANEL, foreground=MUTED,
-                        padding=(18, 9), font=(FONT, 9, "bold"))
+            s.configure("TNotebook", background=BG, borderwidth=0, tabmargins=[0, 4, 0, 0])
+            s.configure("TNotebook.Tab", background="#121824", foreground="#8a99b5",
+                        borderwidth=0, lightcolor="#121824", darkcolor="#121824",
+                        focuscolor="#121824", padding=(18, 8), font=(FONT, 9, "bold"))
             s.map("TNotebook.Tab",
-                  background=[("selected", CARD_ON), ("active", CARD)],
-                  foreground=[("selected", "#4fa3ff"), ("active", TEXT)])
+                  background=[("selected", "#2563eb"), ("active", "#1e293b")],
+                  foreground=[("selected", "#ffffff"), ("active", "#f8fafc")],
+                  lightcolor=[("selected", "#2563eb"), ("active", "#1e293b")],
+                  darkcolor=[("selected", "#2563eb"), ("active", "#1e293b")])
             s.configure("TLabelframe", background=PANEL, borderwidth=1, relief="solid")
             s.configure("TLabelframe.Label", background=PANEL, foreground="#4fa3ff", font=(FONT, 9, "bold"))
             s.configure("TLabel", background=BG, foreground=TEXT)
             s.configure("TCheckbutton", background=BG, foreground=TEXT)
             s.configure("TButton", background=PANEL, foreground=TEXT, font=(FONT, 9))
             s.map("TButton", background=[("active", CARD_ON)])
-            s.configure("TEntry", fieldbackground=PANEL, foreground=TEXT)
-            s.configure("TCombobox", fieldbackground=PANEL, foreground=TEXT)
+            s.configure("TEntry", fieldbackground="#162030", foreground=TEXT, bordercolor=EDGE)
+            s.configure("TCombobox", fieldbackground="#162030", background="#162030", foreground=TEXT,
+                        arrowcolor="#38bdf8", bordercolor=EDGE, lightcolor=EDGE, darkcolor=EDGE)
             s.configure("TListbox", background=PANEL, foreground=TEXT)
             # clam paints the scale trough in a pale cream that reads as a
             # bright bar against this dark UI - tone it down to the panel
-            s.configure("Horizontal.TScale", background=BG, troughcolor=PANEL,
-                        darkcolor=PANEL, lightcolor=PANEL,
-                        bordercolor=PANEL)
+            s.configure("Horizontal.TScale", background=PANEL, troughcolor="#162030",
+                        darkcolor="#2563eb", lightcolor="#38bdf8", bordercolor=EDGE)
         except Exception as exc:
             log(f"style: {exc}")
 
@@ -536,18 +567,18 @@ class PhoenixControl:
         bar.pack(fill="x", pady=(0, 6))
         tk.Label(bar, text="Mascot Gallery", bg=BG, fg=TEXT,
                  font=(FONT, 10, "bold")).pack(side="left")
-        tk.Button(bar, text="Add", width=6, command=self.add_mascot,
-                  bg=CARD, fg=TEXT, activebackground=CARD_ON,
-                  relief="flat", bd=0).pack(side="right", padx=2)
-        tk.Button(bar, text="Duplicate", width=9, command=self.duplicate_mascot,
-                  bg=CARD, fg=TEXT, activebackground=CARD_ON,
-                  relief="flat", bd=0).pack(side="right", padx=2)
-        tk.Button(bar, text="Delete", width=7, command=self.delete_mascot,
-                  bg=CARD, fg=TEXT, activebackground=CARD_ON,
-                  relief="flat", bd=0).pack(side="right", padx=2)
-        tk.Button(bar, text="🎲 Random", width=9, command=self.random_mascot,
-                  bg=CARD, fg="#4fa3ff", activebackground=CARD_ON,
-                  relief="flat", bd=0, font=(FONT, 8, "bold")).pack(side="right", padx=2)
+        tk.Button(bar, text="＋ Add", command=self.add_mascot,
+                  bg="#1e293b", fg=TEXT, activebackground="#334155",
+                  relief="flat", bd=0, padx=8, pady=3, font=(FONT, 8, "bold"), cursor="hand2").pack(side="right", padx=2)
+        tk.Button(bar, text="Duplicate", command=self.duplicate_mascot,
+                  bg="#1e293b", fg=TEXT, activebackground="#334155",
+                  relief="flat", bd=0, padx=8, pady=3, font=(FONT, 8), cursor="hand2").pack(side="right", padx=2)
+        tk.Button(bar, text="Delete", command=self.delete_mascot,
+                  bg="#1e293b", fg="#f87171", activebackground="#3b1d24",
+                  relief="flat", bd=0, padx=8, pady=3, font=(FONT, 8), cursor="hand2").pack(side="right", padx=2)
+        tk.Button(bar, text="🎲 Random", command=self.random_mascot,
+                  bg="#1e293b", fg="#38bdf8", activebackground="#0284c7", activeforeground="#ffffff",
+                  relief="flat", bd=0, padx=8, pady=3, font=(FONT, 8, "bold"), cursor="hand2").pack(side="right", padx=2)
 
         holder = tk.Frame(left, bg=BG)
         holder.pack(fill="both", expand=True)
@@ -562,27 +593,99 @@ class PhoenixControl:
         self.gallery.bind("<MouseWheel>", self._gallery_wheel)
 
         right = tk.Frame(page, bg=PANEL, width=340)
-        right.pack(side="right", fill="y", pady=10)
+        right.pack(side="right", fill="y", pady=(0, 10))
         right.pack_propagate(False)
         self._build_customise(right)
 
     def _build_customise(self, parent):
         tk, ttk = self.tk, self.ttk
-        tk.Label(parent, text="Customise", bg=PANEL, fg=MUTED,
-                 font=(FONT, 9, "bold")).pack(anchor="w", padx=14, pady=(12, 8))
 
-        self.preview = tk.Canvas(parent, bg=PANEL, highlightthickness=0, height=120)
-        self.preview.pack(fill="x", padx=14)
+        # Top Header Bar
+        header = tk.Frame(parent, bg=PANEL)
+        header.pack(fill="x", padx=12, pady=(10, 4))
+        tk.Label(header, text="Customise Companion", bg=PANEL, fg=TEXT,
+                 font=(FONT, 10, "bold")).pack(side="left")
+        tk.Label(header, text="Live sync", bg=CARD, fg="#38ef7d",
+                 font=(FONT, 7, "bold"), padx=6, pady=1).pack(side="right")
 
-        form = tk.Frame(parent, bg=PANEL)
-        form.pack(fill="x", padx=14, pady=10)
+        # Bottom STICKY Action Bar: The "Use this mascot" button is ALWAYS visible!
+        bottom_bar = tk.Frame(parent, bg=PANEL)
+        bottom_bar.pack(side="bottom", fill="x", padx=12, pady=(6, 12))
+
+        self.btn_use_mascot = tk.Button(
+            bottom_bar,
+            text="✦ Use this mascot on the island",
+            command=self.use_selected,
+            bg="#2563eb",
+            fg="#ffffff",
+            activebackground="#3b82f6",
+            activeforeground="#ffffff",
+            relief="flat",
+            bd=0,
+            font=(FONT, 10, "bold"),
+            padx=10,
+            pady=8,
+            cursor="hand2"
+        )
+        self.btn_use_mascot.pack(fill="x")
+
+        # Middle Scrollable Container (Canvas + Scrollbar)
+        scroll_holder = tk.Frame(parent, bg=PANEL)
+        scroll_holder.pack(fill="both", expand=True)
+
+        self.customise_canvas = tk.Canvas(scroll_holder, bg=PANEL, highlightthickness=0, bd=0)
+        self.customise_vs = tk.Scrollbar(scroll_holder, orient="vertical", command=self.customise_canvas.yview)
+        self.customise_canvas.configure(yscrollcommand=self.customise_vs.set)
+
+        self.customise_vs.pack(side="right", fill="y")
+        self.customise_canvas.pack(side="left", fill="both", expand=True)
+
+        body = tk.Frame(self.customise_canvas, bg=PANEL)
+        self.customise_body_window = self.customise_canvas.create_window((0, 0), window=body, anchor="nw")
+
+        def _on_body_configure(e):
+            if getattr(self, "customise_canvas", None):
+                self.customise_canvas.configure(scrollregion=self.customise_canvas.bbox("all"))
+
+        def _on_canvas_configure(e):
+            if getattr(self, "customise_canvas", None):
+                self.customise_canvas.itemconfig(self.customise_body_window, width=e.width)
+
+        body.bind("<Configure>", _on_body_configure)
+        self.customise_canvas.bind("<Configure>", _on_canvas_configure)
+
+        def _on_mousewheel(e):
+            if not getattr(self, "customise_canvas", None):
+                return
+            if getattr(e, "delta", 0):
+                self.customise_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+            elif getattr(e, "num", None) == 5:
+                self.customise_canvas.yview_scroll(1, "units")
+            elif getattr(e, "num", None) == 4:
+                self.customise_canvas.yview_scroll(-1, "units")
+
+        self.customise_canvas.bind("<MouseWheel>", _on_mousewheel)
+        body.bind("<MouseWheel>", _on_mousewheel)
+
+        def _bind_wheel(w):
+            w.bind("<MouseWheel>", _on_mousewheel, add="+")
+            for child in w.winfo_children():
+                _bind_wheel(child)
+
+        # Content inside scrollable body:
+        self.preview = tk.Canvas(body, bg=CARD, highlightthickness=1, highlightbackground=EDGE, height=110)
+        self.preview.pack(fill="x", padx=12, pady=(4, 8))
+        self.preview.bind("<Configure>", lambda _e: self._draw_preview())
+
+        form = tk.Frame(body, bg=PANEL)
+        form.pack(fill="x", padx=12, pady=(0, 6))
 
         tk.Label(form, text="Name", bg=PANEL, fg=MUTED,
                  font=(FONT, 9)).grid(row=0, column=0, sticky="w", pady=3)
         self.name_var = tk.StringVar()
-        e = tk.Entry(form, textvariable=self.name_var, bg=PANEL, fg=TEXT,
+        e = tk.Entry(form, textvariable=self.name_var, bg="#162030", fg=TEXT,
                      insertbackground=TEXT, relief="flat", highlightthickness=1,
-                     highlightbackground=EDGE, highlightcolor=ACCENT)
+                     highlightbackground=EDGE, highlightcolor="#38bdf8")
         e.grid(row=0, column=1, sticky="ew", padx=(10, 0), pady=3, ipady=3)
         e.bind("<Return>", lambda _ev: self.commit_name())
         e.bind("<FocusOut>", lambda _ev: self.commit_name())
@@ -608,8 +711,6 @@ class PhoenixControl:
         self.size_var = tk.DoubleVar(value=1.0)
         sc = ttk.Scale(form, from_=SIZE_MIN, to=SIZE_MAX, variable=self.size_var,
                        orient="horizontal", command=lambda _v: self.preview_size())
-        # the island follows the drag live, but the file is only written once
-        # on release - a slider drag would otherwise save ~60 times a second
         sc.bind("<ButtonRelease-1>", lambda _e: self.commit_size())
         sc.grid(row=3, column=1, sticky="ew", padx=(10, 0), pady=3)
         self.size_label = tk.Label(form, text="100%", bg=PANEL, fg=TEXT,
@@ -618,29 +719,26 @@ class PhoenixControl:
 
         form.columnconfigure(1, weight=1)
 
-        self._swatch_row(parent, "Head colour", PALETTE, "head")
-        self._swatch_row(parent, "Accent colour", ACCENTS, "accent")
+        self._swatch_row(body, "Head colour", PALETTE, "head")
+        self._swatch_row(body, "Accent colour", ACCENTS, "accent")
 
-        tk.Label(parent, text="Emoji", bg=PANEL, fg=MUTED,
-                 font=(FONT, 9, "bold")).pack(anchor="w", padx=14, pady=(8, 2))
-        grid = tk.Frame(parent, bg=PANEL)
-        grid.pack(fill="x", padx=14)
+        tk.Label(body, text="Emoji Face", bg=PANEL, fg=MUTED,
+                 font=(FONT, 8, "bold")).pack(anchor="w", padx=12, pady=(8, 2))
+        grid = tk.Frame(body, bg=PANEL)
+        grid.pack(fill="x", padx=12, pady=(0, 10))
         self.emoji_buttons = []
         for i, glyph in enumerate(EMOJI):
-            b = tk.Button(grid, text=glyph, font=("Segoe UI Emoji", 14),
+            b = tk.Button(grid, text=glyph, font=("Segoe UI Emoji", 13),
                           command=lambda g=glyph: self.commit_emoji(g),
-                          bg=CARD, fg=TEXT, relief="flat", bd=0, width=3)
+                          bg=CARD, fg=TEXT, relief="flat", bd=0, width=3, cursor="hand2")
             b.grid(row=i // 6, column=i % 6, padx=2, pady=2)
             self.emoji_buttons.append((glyph, b))
         b = tk.Button(grid, text="none", font=(FONT, 8),
                       command=lambda: self.commit_emoji(""),
-                      bg=CARD, fg=MUTED, relief="flat", bd=0, width=5)
+                      bg=CARD, fg=MUTED, relief="flat", bd=0, width=5, cursor="hand2")
         b.grid(row=len(EMOJI) // 6, column=len(EMOJI) % 6, padx=2, pady=2)
 
-        tk.Button(parent, text="Use this mascot on the island",
-                  command=self.use_selected, bg="#2d5f9e", fg=TEXT,
-                  activebackground="#3a7ac9", relief="flat", bd=0,
-                  font=(FONT, 10, "bold")).pack(fill="x", padx=14, pady=(14, 14))
+        _bind_wheel(body)
 
     def _swatch_row(self, parent, label, colours, which):
         tk = self.tk
