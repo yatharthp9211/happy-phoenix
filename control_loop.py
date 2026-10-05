@@ -255,7 +255,7 @@ class Orchestrator:
         whether it passes (R6)."""
         if action.generation_id != self.goal.generation_id:
             return STALE_GENERATION
-        if action.observation_id != self.perception.observation_id:
+        if action.action_type in VISUAL_ACTIONS and action.observation_id != self.perception.observation_id:
             return STALE_OBSERVATION
         if action.action_id in self.execution.executed_ids:
             return DOUBLE_EXECUTION

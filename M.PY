@@ -191,14 +191,14 @@ void main() {
 # App Shortcuts Registry
 # ---------------------------------------------------------------------------
 ALL_SHORTCUT_APPS = [
-    {"id": "whatsapp", "name": "WhatsApp", "icon": "💬", "color": (37, 211, 102), "action": "open whatsapp desktop"},
-    {"id": "spotify", "name": "Spotify", "icon": "🎵", "color": (30, 215, 96), "action": "play favorites on spotify"},
-    {"id": "youtube", "name": "YouTube", "icon": "▶", "color": (255, 60, 60), "action": "browse trending youtube"},
-    {"id": "browser", "name": "Browser", "icon": "🌐", "color": (66, 133, 244), "action": "launch google chrome"},
-    {"id": "snapchat", "name": "Snapchat", "icon": "👻", "color": (255, 235, 59), "action": "open snapchat web"},
-    {"id": "discord", "name": "Discord", "icon": "🎮", "color": (114, 137, 218), "action": "open discord app"},
-    {"id": "terminal", "name": "Terminal", "icon": ">_", "color": (180, 190, 205), "action": "spawn bash terminal"},
-    {"id": "vscode", "name": "VS Code", "icon": "⚡", "color": (0, 122, 204), "action": "open current project in vscode"},
+    {"id": "whatsapp", "name": "WhatsApp", "icon": "💬", "color": (37, 211, 102), "action": "open whatsapp"},
+    {"id": "spotify", "name": "Spotify", "icon": "🎵", "color": (30, 215, 96), "action": "open spotify"},
+    {"id": "youtube", "name": "YouTube", "icon": "▶", "color": (255, 60, 60), "action": "open youtube"},
+    {"id": "browser", "name": "Browser", "icon": "🌐", "color": (66, 133, 244), "action": "open chrome"},
+    {"id": "snapchat", "name": "Snapchat", "icon": "👻", "color": (255, 235, 59), "action": "open snapchat"},
+    {"id": "discord", "name": "Discord", "icon": "🎮", "color": (114, 137, 218), "action": "open discord"},
+    {"id": "terminal", "name": "Terminal", "icon": ">_", "color": (180, 190, 205), "action": "open terminal"},
+    {"id": "vscode", "name": "VS Code", "icon": "⚡", "color": (0, 122, 204), "action": "open vscode"},
 ]
 
 # ---------------------------------------------------------------------------
@@ -520,6 +520,13 @@ class PhoenixDynamicIslandOverlay:
         
         self.window_pos_x = 300
         self.window_pos_y = 0
+        self.has_custom_pos = False
+        self.is_dragging = False
+        self.mouse_pressed = False
+        self.press_screen_pos = (0, 0)
+        self.press_island_pos = (0, 0)
+        self.press_time = 0.0
+        self.drag_threshold = 6
         self.click_through = False
         self._scan_hidden = 0
         self._scan_is_hidden = False
@@ -1081,8 +1088,32 @@ class PhoenixDynamicIslandOverlay:
                         # the chat panel scrolls even while the island is click-through
                         self._scroll_chat(56 if event.key == K_PAGEUP else -56)
             elif event.type == MOUSEBUTTONDOWN:
-                if event.button == 1:
-                    self._handle_click(event.pos)
+                if event.button in (1, 3):  # Left click or Right click to drag
+                    sx, sy = self._get_screen_cursor_pos()
+                    self.mouse_pressed = True
+                    self.press_screen_pos = (sx, sy)
+                    self.press_island_pos = (self.window_pos_x, self.window_pos_y)
+                    self.press_time = time.time()
+                    self.is_dragging = False
+                    self._press_button = event.button
+                    self._press_pos = event.pos
+            elif event.type == MOUSEBUTTONUP:
+                if event.button in (1, 3):
+                    was_dragging = self.is_dragging
+                    self.mouse_pressed = False
+                    self.is_dragging = False
+                    if not was_dragging and event.button == 1:
+                        self._handle_click(getattr(self, "_press_pos", event.pos))
+            elif event.type == MOUSEMOTION:
+                if self.mouse_pressed:
+                    sx, sy = self._get_screen_cursor_pos()
+                    dx = sx - self.press_screen_pos[0]
+                    dy = sy - self.press_screen_pos[1]
+                    if not self.is_dragging and (abs(dx) >= self.drag_threshold or abs(dy) >= self.drag_threshold):
+                        self.is_dragging = True
+                        self.has_custom_pos = True
+                    if self.is_dragging:
+                        self._drag_to(self.press_island_pos[0] + dx, self.press_island_pos[1] + dy)
             elif event.type == MOUSEWHEEL:
                 if self.expanded_open:
                     # the expanded view scrolls its own lists
@@ -1097,6 +1128,42 @@ class PhoenixDynamicIslandOverlay:
                 # wheel over the panel scrolls the chat
                 elif self._chat_rect.collidepoint(self.get_cursor_pos()):
                     self._scroll_chat(event.y * 40.0)
+
+    def _get_screen_cursor_pos(self) -> Tuple[int, int]:
+        """Get absolute cursor position across the entire desktop."""
+        if IS_WINDOWS:
+            try:
+                pt = POINT()
+                ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+                return int(pt.x), int(pt.y)
+            except Exception:
+                pass
+        mx, my = pygame.mouse.get_pos()
+        return int(self.window_pos_x + mx), int(self.window_pos_y + my)
+
+    def _drag_to(self, new_x: int, new_y: int):
+        """Move the Dynamic Island window freely across the desktop."""
+        screen_w = ctypes.windll.user32.GetSystemMetrics(0) if IS_WINDOWS else 1920
+        screen_h = ctypes.windll.user32.GetSystemMetrics(1) if IS_WINDOWS else 1080
+        w, h = self.win_w, self.win_h
+        clamped_x = max(0, min(int(new_x), max(0, screen_w - w)))
+        clamped_y = max(0, min(int(new_y), max(0, screen_h - h)))
+        # Snap back to top center if user drags near top-center edge
+        center_x = max(0, (screen_w - w) // 2)
+        if clamped_y <= 12 and abs(clamped_x - center_x) < 50:
+            clamped_y = 0
+            clamped_x = center_x
+            self.has_custom_pos = False
+        else:
+            self.has_custom_pos = True
+        self.window_pos_x = clamped_x
+        self.window_pos_y = clamped_y
+        hwnd = self._hwnd()
+        if hwnd:
+            SWP_SHOWWINDOW, SWP_NOACTIVATE = 0x0040, 0x0010
+            SWP_NOSIZE = 0x0001
+            set_window_pos(hwnd, clamped_x, clamped_y, 0, 0,
+                           SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOSIZE)
 
     def _handle_click(self, pos: Tuple[int, int]):
         mx, my = pos
@@ -1257,12 +1324,19 @@ class PhoenixDynamicIslandOverlay:
         self._last_win = (w, h)
         self.win_w, self.win_h = w, h
         try:
-            screen_w = ctypes.windll.user32.GetSystemMetrics(0)
-            x = max(0, (screen_w - w) // 2)
-            self.window_pos_x, self.window_pos_y = x, 0
+            screen_w = ctypes.windll.user32.GetSystemMetrics(0) if IS_WINDOWS else 1920
+            screen_h = ctypes.windll.user32.GetSystemMetrics(1) if IS_WINDOWS else 1080
+            if not getattr(self, "has_custom_pos", False):
+                x = max(0, (screen_w - w) // 2)
+                y = 0
+                self.window_pos_x, self.window_pos_y = x, y
+            else:
+                x = max(0, min(int(self.window_pos_x), max(0, screen_w - w)))
+                y = max(0, min(int(self.window_pos_y), max(0, screen_h - h)))
+                self.window_pos_x, self.window_pos_y = x, y
             SWP_SHOWWINDOW, SWP_NOACTIVATE = 0x0040, 0x0010
             SWP_FRAMECHANGED = 0x0020
-            if not set_window_pos(hwnd, x, 0, w, h,
+            if not set_window_pos(hwnd, x, y, w, h,
                                   SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_FRAMECHANGED):
                 log_debug("window sync: SetWindowPos refused")
         except Exception as e:

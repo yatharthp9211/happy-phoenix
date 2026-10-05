@@ -33,7 +33,10 @@ import hashlib
 import queue
 import subprocess
 import threading
-import tkinter as tk
+try:
+    import tkinter as tk
+except ImportError:
+    tk = None
 from datetime import datetime
 import warnings
 
@@ -194,6 +197,8 @@ class StatusOverlay:
         self.circle = None
 
     def _run(self):
+        if tk is None:
+            return
         self.root = tk.Tk()
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
@@ -257,8 +262,9 @@ def _spawn_tts_worker():
     # MK4: the worker must NOT inherit stdout/stderr. Holding the parent's
     # pipe kept every automated check (self-check/smoke under `| tail`) alive
     # forever after Python exited -- the pipe never saw EOF.
+    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tts_worker_2.py")
     return subprocess.Popen(
-        [sys.executable, "-u", "tts_worker_2.py", VOICE_ID],
+        [sys.executable, "-u", script_path, VOICE_ID],
         stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         text=True, encoding="utf-8", bufsize=1,
@@ -751,7 +757,7 @@ class ContextTransitionManager:
                 self.pending_context = current_window
                 self.pending_time = time.time()
             elif time.time() - self.pending_time > 0.7:
-                if scene_changed and not generation_active:
+                if scene_changed and not generation_active and task_state.get("active"):
                     self.interrupt("window_and_scene_changed")
                 self.current_window = current_window
                 self.pending_context = None
@@ -1952,29 +1958,24 @@ def _orchestrator_gate(act_task):
       DOUBLE_EXECUTION  -> reject (already ran)
       EXECUTOR_BUSY     -> reject (another action in flight)
     """
-    # Cheap screen-staleness check: if the live frame drifted meaningfully from
-    # the observation the LLM planned against, the action is stale (R2/R3) even
-    # though a fresh full re-parse hasn't been allocated yet. Uses thumb-diff so
-    # small/animated content does not false-positive; a real scene change does.
-    obs_thumb = perception_state.extra.get("thumb")
-    with frame_lock:
-        live = latest_frame.copy() if latest_frame is not None else None
-    if live is not None and obs_thumb is not None:
-        try:
-            # Fraction-of-pixels threshold: 10% of the frame is a genuine
-            # interaction; a cursor blink is ~0.4%. A stale hit just forces a
-            # fresh re-parse + re-plan (never an unsafe click).
-            if not _same_screen(obs_thumb, _thumb(live), thr=0.10):
-                proposal = orchestrator.propose("other", act_task)
-                log_event("TASK", "ORCHESTRATOR: live screen drifted from the "
-                                  "observation the action was planned against -> STALE")
-                return STALE_OBSERVATION, proposal
-        except Exception:
-            pass
     atype, tid, ttype, ttext, tb = _classify_command(act_task)
     proposal = orchestrator.propose(
         atype, act_task,
         target_id=tid, target_type=ttype, target_text=ttext, bounds=tb)
+
+    # Cheap screen-staleness check: only for visual actions that depend on DOM elements/coordinates
+    if atype in VISUAL_ACTIONS:
+        obs_thumb = perception_state.extra.get("thumb")
+        with frame_lock:
+            live = latest_frame.copy() if latest_frame is not None else None
+        if live is not None and obs_thumb is not None:
+            try:
+                if not _same_screen(obs_thumb, _thumb(live), thr=0.10):
+                    log_event("TASK", "ORCHESTRATOR: live screen drifted from the "
+                                      "observation the action was planned against -> STALE")
+                    return STALE_OBSERVATION, proposal
+            except Exception:
+                pass
     if atype in VISUAL_ACTIONS and tid is not None:
         if not orchestrator.target_is_valid(proposal):
             # Id existed when the LLM said it, but the CURRENT observation's
@@ -2023,7 +2024,10 @@ def _dispatch_proposal(proposal, act_task, screen_changed_hint=None):
         log_event("TASK", f"Double-execution guard refused {act_task}")
         return {"success": False, "results": "DOUBLE_EXECUTION"}
     before_thumb = _thumb(latest_frame) if latest_frame is not None else None
-    import nidle_mk4_claude_edits as nidle_mk4
+    try:
+        import nidle_mk4_claude_edits as nidle_mk4
+    except ImportError:
+        import nidle_mk4
     nidle_mk4.set_active_dom(last_dom)
     # Deterministic dispatcher, NOT the LLM router: exact coords / known commands
     # must never wait on (or be mangled by) the needle_router's LLM (resolved #1).
@@ -2370,6 +2374,9 @@ def brain_wants_work(text, is_proactive=False):
     if verdict in _WORK_YES:
         return True
     if verdict in _WORK_NO:
+        if _work_by_keyword(text):
+            log_event("NEEDLE", f"work judge said NO but action keywords found in {text!r} -> overriding to work")
+            return True
         return False
     log_event("NEEDLE", f"work judge unparseable ({content!r}); using keywords")
     return _work_by_keyword(text)
@@ -2384,9 +2391,26 @@ def _work_by_keyword(text):
 def _extract_launch_app(text_input):
     """Deterministic regex fallback to recover the app name for auto-launch
     when the intent parser returns nothing."""
-    t = (text_input or "").strip()
+    t = (text_input or "").strip().lower()
     if not t:
         return None
+
+    # Check for known apps explicitly in target positions: "in vscode", "on youtube", "via spotify"
+    prep_m = re.search(r"\b(?:on|in|using|via|through|with)\s+(whatsapp|snapchat|telegram|spotify|youtube|chrome|edge|discord|slack|vscode|vs\s+code|terminal|notepad|calculator|calc)\b", t)
+    if prep_m:
+        app = prep_m.group(1).replace(" ", "")
+        return "vscode" if app == "vscode" else app
+
+    # Check for "browse/spawn/run/open/launch/start <app>"
+    m_direct = re.search(r"\b(?:open|launch|start|run|browse|spawn)\s+(?:(?:the|a|an)\s+)?(?:app\s+)?(whatsapp|snapchat|telegram|spotify|youtube|chrome|google\s+chrome|browser|edge|discord|slack|vscode|vs\s+code|terminal|notepad|calculator|calc)\b", t)
+    if m_direct:
+        app = m_direct.group(1).replace(" ", "")
+        if app in ("googlechrome", "browser"):
+            return "chrome"
+        if app == "vscode":
+            return "vscode"
+        return app
+
     m = re.search(r"\b(?:open|launch|start)\s+(?:(?:the|a|an)\s+)?(?:app\s+)?"
                   r"([a-z0-9][a-z0-9 .'%#+-]{0,40}?)"
                   r"(?=\s+(?:and|by|through|then|in|from|on|to)\b|[.,;!?]|$)",
@@ -2397,11 +2421,9 @@ def _extract_launch_app(text_input):
                       r"([a-z0-9][a-z0-9 .'%#+-]{0,40}?)(?=\s+and\b|[.,;!?]|$)",
                       t, re.I)
     if not m:
-        # "X on whatsapp" / "message X on snapchat"
-        m = re.search(r"\b(?:on|in|using|via)\s+(whatsapp|snapchat|telegram|spotify|youtube|chrome|edge|discord|slack)\b", t, re.I)
+        m = re.search(r"\b(whatsapp|snapchat|telegram|spotify|youtube|chrome|edge|discord|slack|vscode|terminal)\b", t)
         if m:
-            return m.group(1).lower()
-    if not m:
+            return m.group(1)
         return None
     app = m.group(1).strip().lower()
     return app or None
@@ -2530,6 +2552,7 @@ def process_interaction(text_input, is_proactive=False):
                     task_state["driver"] = "wikipedia"
                     task_state["info_query"] = rx_wiki
                     task_state["expected_text"] = rx_wiki
+                    task_state["active"] = True
                     m_query = None
                     log_event("TASK", f"[REGEX-FALLBACK] Wikipedia query = '{rx_wiki}'")
                 else:
@@ -2538,6 +2561,7 @@ def process_interaction(text_input, is_proactive=False):
                         task_state["driver"] = "google"
                         task_state["info_query"] = rx_google
                         task_state["expected_text"] = rx_google
+                        task_state["active"] = True
                         m_query = None
                         log_event("TASK", f"[REGEX-FALLBACK] Google/web query = '{rx_google}'")
                     else:
@@ -2546,12 +2570,14 @@ def process_interaction(text_input, is_proactive=False):
                             task_state["driver"] = "media"
                             task_state["media_cmd"] = rx_media
                             task_state["expected_text"] = None
+                            task_state["active"] = True
                             log_event("TASK", f"[REGEX-FALLBACK] Media command = '{rx_media}'")
 
         if not task_state.get("target_app"):
             rx_launch = _extract_launch_app(text_input)
             if rx_launch:
                 task_state["target_app"] = rx_launch
+                task_state["active"] = True
                 log_event("TASK", f"[REGEX-FALLBACK] target_app = '{rx_launch}'")
 
         # Resolve target_app for messaging tasks:
@@ -2618,7 +2644,13 @@ def process_interaction(text_input, is_proactive=False):
                 and task_state["target_app"]
                 and task_state.get("driver") not in (
                     "notifications", "wikipedia", "google", "media")):
-            auto_cmd = f"launch app {task_state['target_app']}"
+            target = (task_state['target_app'] or "").lower()
+            if target == "youtube" and task_state.get("expected_text"):
+                auto_cmd = f"play {task_state['expected_text']} on youtube"
+            elif target in ("google", "browser", "chrome") and task_state.get("expected_text"):
+                auto_cmd = f"google {task_state['expected_text']}"
+            else:
+                auto_cmd = f"launch app {task_state['target_app']}"
             auto_prop = orchestrator.propose("launch", auto_cmd,
                                              target_text=task_state['target_app'])
             auto_res = _dispatch_proposal(auto_prop, auto_cmd,
@@ -2641,7 +2673,7 @@ def process_interaction(text_input, is_proactive=False):
                     f"I already launched it: {auto_msg}. Now continue: the app should be on "
                     "screen in a moment - look at the screenshot and proceed with the rest "
                     "of the task.]")})
-                time.sleep(4)
+                time.sleep(1.2)
                 _wait_for_screen_settle()
             else:
                 # Tell the model the truth instead of letting it assume the app

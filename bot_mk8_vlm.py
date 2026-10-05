@@ -1851,7 +1851,10 @@ def _dispatch_proposal(proposal, act_task, screen_changed_hint=None):
         log_event("TASK", f"Double-execution guard refused {act_task}")
         return {"success": False, "results": "DOUBLE_EXECUTION"}
     before_thumb = _thumb(latest_frame) if latest_frame is not None else None
-    import nidle_mk4_claude_edits as nidle_mk4
+    try:
+        import nidle_mk4_claude_edits as nidle_mk4
+    except ImportError:
+        import nidle_mk4
     nidle_mk4.set_active_dom(last_dom)
     # Deterministic dispatcher, NOT the LLM router: exact coords / known commands
     # must never wait on (or be mangled by) the needle_router's LLM (resolved #1).

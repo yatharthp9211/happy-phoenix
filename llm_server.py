@@ -371,6 +371,7 @@ class LlamaServerManager:
         )
         self._raise_for_grammar(resp)
         resp.raise_for_status()
+        resp.encoding = "utf-8"
         for raw in resp.iter_lines(decode_unicode=True):
             if not raw or not raw.startswith("data:"):
                 continue
