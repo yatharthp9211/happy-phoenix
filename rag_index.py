@@ -16,9 +16,13 @@ import time
 import hashlib
 from pathlib import Path
 
-import numpy as np
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
+try:
+    import numpy as np
+    from sentence_transformers import SentenceTransformer
+    from sklearn.metrics.pairwise import cosine_similarity
+except Exception:
+    SentenceTransformer = None
+    cosine_similarity = None
 
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 SUPPORTED_EXTS = {".md", ".txt", ".py", ".json", ".jsonl", ".csv", ".log", ".toml", ".yaml", ".yml"}
@@ -276,9 +280,15 @@ class RagIndex:
         return "\n".join(lines)
 
 
-def build_index_if_stale(root: str) -> RagIndex:
-    idx = RagIndex(root)
-    added = idx.build()
-    if added:
-        print(f"[RAG] Indexed {added} new chunks | {idx.stats()}")
-    return idx
+def build_index_if_stale(root: str):
+    if SentenceTransformer is None:
+        return None
+    try:
+        idx = RagIndex(root)
+        added = idx.build()
+        if added:
+            print(f"[RAG] Indexed {added} new chunks | {idx.stats()}")
+        return idx
+    except Exception as e:
+        print(f"[RAG] Indexing unavailable: {e}")
+        return None

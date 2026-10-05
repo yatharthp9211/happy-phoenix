@@ -1706,7 +1706,7 @@ _ACTION_INTENT_KEYWORDS = (
     "open", "launch", "start app", "play", "click", "search", "move cursor",
     "type", "press", "pause", "resume", "mute", "volume", "music", "song",
     "video", "youtube", "spotify", "message", "dm", "text", "introduce",
-    "tell", "notification", "wikipedia", "google", "web", "internet",
+    "notification", "wikipedia", "google", "web", "internet",
 )
 
 # True when the typed text shares no meaningful word with the requested query

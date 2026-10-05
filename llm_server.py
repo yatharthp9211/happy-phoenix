@@ -372,17 +372,20 @@ class LlamaServerManager:
         self._raise_for_grammar(resp)
         resp.raise_for_status()
         resp.encoding = "utf-8"
-        for raw in resp.iter_lines(decode_unicode=True):
-            if not raw or not raw.startswith("data:"):
-                continue
-            data = raw[len("data:"):].strip()
-            if data == "[DONE]":
-                break
-            try:
-                obj = json.loads(data)
-            except json.JSONDecodeError:
-                continue
-            choices = obj.get("choices") or [{}]
-            delta = (choices[0].get("delta") or {}).get("content")
-            if delta:
-                yield {"choices": [{"delta": {"content": delta}}]}
+        try:
+            for raw in resp.iter_lines(decode_unicode=True):
+                if not raw or not raw.startswith("data:"):
+                    continue
+                data = raw[len("data:"):].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                choices = obj.get("choices") or [{}]
+                delta = (choices[0].get("delta") or {}).get("content")
+                if delta:
+                    yield {"choices": [{"delta": {"content": delta}}]}
+        except (requests.exceptions.RequestException, ConnectionError, OSError) as e:
+            _log(f"Stream interrupted: {e}")
