@@ -93,7 +93,8 @@ def set_window_pos(hwnd, x: int, y: int, w: int, h: int,
                        ctypes.c_int, ctypes.c_int, ctypes.c_int,
                        ctypes.c_uint]
         fn.restype = ctypes.c_bool
-        return bool(fn(hwnd, -1 if topmost else None, x, y, w, h, flags))
+        hwnd_insert = ctypes.c_void_p(-1) if topmost else None
+        return bool(fn(hwnd, hwnd_insert, x, y, w, h, flags))
     except Exception as e:
         log_debug(f"SetWindowPos notice: {e}")
         return False
@@ -522,7 +523,12 @@ class PhoenixDynamicIslandOverlay:
         self.click_through = False
         self._scan_hidden = 0
         self._scan_is_hidden = False
-        self.use_moderngl = MODERNGL_AVAILABLE
+        # On Windows, Pygame's native 2D display mode is required for hardware DWM
+        # colorkey transparency (RGB 1,1,1 is completely keyed out into the desktop wallpaper
+        # without any black box). ModernGL's OpenGL context cannot be color-keyed on Windows DWM.
+        self.use_moderngl = MODERNGL_AVAILABLE and not IS_WINDOWS
+        if os.environ.get("PHOENIX_FORCE_MODERNGL", "0") == "1":
+            self.use_moderngl = MODERNGL_AVAILABLE
         self.start_time = time.time()
 
     def _apply_framer_motion_state_transition(self, prev_state: str, new_state: str):
@@ -857,11 +863,14 @@ class PhoenixDynamicIslandOverlay:
             user32 = ctypes.windll.user32
             # Always on top
             SWP_SHOWWINDOW = 0x0040
+            SWP_FRAMECHANGED = 0x0020
             set_window_pos(hwnd, x, y, self.screen_width, self.screen_height,
-                           SWP_SHOWWINDOW)
+                           SWP_SHOWWINDOW | SWP_FRAMECHANGED)
             
             # Layered colorkey transparency for RGB(1, 1, 1)
             self._ensure_colorkey(hwnd)
+            if self.setting_toggles.get("translucent", False) and not self._alpha_failed:
+                self._apply_transparency()
             log_debug("Applied Windows HWND_TOPMOST and Layered colorkey transparency.")
         except Exception as e:
             log_debug(f"Transparency notice: {e}")
@@ -1252,8 +1261,9 @@ class PhoenixDynamicIslandOverlay:
             x = max(0, (screen_w - w) // 2)
             self.window_pos_x, self.window_pos_y = x, 0
             SWP_SHOWWINDOW, SWP_NOACTIVATE = 0x0040, 0x0010
+            SWP_FRAMECHANGED = 0x0020
             if not set_window_pos(hwnd, x, 0, w, h,
-                                  SWP_SHOWWINDOW | SWP_NOACTIVATE):
+                                  SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_FRAMECHANGED):
                 log_debug("window sync: SetWindowPos refused")
         except Exception as e:
             log_debug(f"window sync notice: {e}")
@@ -3291,7 +3301,7 @@ class PhoenixDynamicIslandOverlay:
                 user32 = ctypes.windll.user32
                 gdi32 = ctypes.windll.gdi32
 
-            surf = pygame.display.get_surface()
+            surf = self.ui_surface if getattr(self, "ui_surface", None) is not None else pygame.display.get_surface()
             if surf is None:
                 return False
             w, h = surf.get_size()
