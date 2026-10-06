@@ -271,7 +271,7 @@ class BotBridge:
             @staticmethod
             def set_state(mode):
                 if mode == "working":
-                    state.set_mood("thinking", "Working", "")
+                    state.set_mood("working", "Working...", "")
                 elif not state.busy:
                     state.set_mood("listening", "Listening", "")
 

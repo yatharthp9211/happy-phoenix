@@ -918,6 +918,21 @@ class PhoenixDynamicIslandOverlay:
             user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new)
             user32.SetLayeredWindowAttributes(hwnd, COLORKEY, 0, LWA_COLORKEY)
             self.click_through = bool(enabled)
+            if enabled:
+                self.state = "working"
+                if self.emotion != "dizzy":
+                    self.emotion = "working"
+                self.target_width = 720.0
+                self.target_height = 294.0
+                self.target_radius = 30.0
+            else:
+                self.state = "waiting"
+                if self.emotion == "working":
+                    self.emotion = "happy"
+                if not self.input_active and not self.settings_open and self.file_anim_state == "none":
+                    self.target_width = 540.0
+                    self.target_height = 76.0
+                    self.target_radius = 28.0
             SWP_NOMOVE = 0x0002
             SWP_NOSIZE = 0x0001
             SWP_NOZORDER = 0x0004
@@ -982,7 +997,7 @@ class PhoenixDynamicIslandOverlay:
                     self.target_height = 294.0   # room for the 120 px chat panel
                     self.target_radius = 30.0
                     if self.emotion != "dizzy":
-                        self.emotion = "thinking"
+                        self.emotion = "working"
                 elif data == "waiting":
                     self.current_action = ""    # the card is over: shortcuts return
                     self.toggle_thoughts(False)  # reasoning folds itself away
@@ -1078,9 +1093,9 @@ class PhoenixDynamicIslandOverlay:
                     elif event.key == K_t:
                         # Quick test file pickup animation
                         self.trigger_file_pickup("presentation.pptx", "4.8 MB")
-                    elif event.key in (K_1, K_2, K_3, K_4, K_5, K_6, K_7, K_8, K_9):
-                        emotions_list = ["greeting", "happy", "thinking", "bored", "loving", "exhausted", "sleepy", "dizzy", "error"]
-                        idx = event.key - K_1
+                    elif event.key in (K_1, K_2, K_3, K_4, K_5, K_6, K_7, K_8, K_9, K_0):
+                        emotions_list = ["greeting", "happy", "working", "thinking", "bored", "loving", "exhausted", "sleepy", "dizzy", "error"]
+                        idx = 9 if event.key == K_0 else (event.key - K_1)
                         if 0 <= idx < len(emotions_list):
                             self.emotion = emotions_list[idx]
                             log_debug(f"Switched emotion to: {self.emotion}")
@@ -1168,7 +1183,9 @@ class PhoenixDynamicIslandOverlay:
     def _handle_click(self, pos: Tuple[int, int]):
         mx, my = pos
         ix = int((self.win_w - self.current_width) / 2)
-        island_rect = pygame.Rect(ix, 0, int(self.current_width), int(self.current_height))
+        iw = int(self.current_width)
+        ih = int(self.current_height)
+        island_rect = pygame.Rect(ix, 0, iw, ih)
 
         if not island_rect.collidepoint(mx, my):
             return
@@ -1250,7 +1267,7 @@ class PhoenixDynamicIslandOverlay:
                     self.on_interrupt()
             else:
                 # Cycle through emotions playfully
-                emotions_cycle = ["happy", "loving", "thinking", "greeting", "bored", "exhausted", "sleepy"]
+                emotions_cycle = ["happy", "working", "thinking", "loving", "greeting", "bored", "exhausted", "sleepy"]
                 cur_idx = emotions_cycle.index(self.emotion) if self.emotion in emotions_cycle else 0
                 self.emotion = emotions_cycle[(cur_idx + 1) % len(emotions_cycle)]
                 self.bounce_offset = -6.0
@@ -1545,7 +1562,15 @@ class PhoenixDynamicIslandOverlay:
                                           self.MODE_HEIGHT[mode])))
 
         # Dynamic State Border Glow
-        border_col = (50, 215, 120, 240) if self.state == "waiting" else (70, 150, 255, 240)
+        t_glow = time.time()
+        is_working_glow = bool(self.click_through or self.state in ("working", "thinking", "acting") or self.emotion == "working")
+        if is_working_glow:
+            pulse_a = int(180 + 75 * math.sin(t_glow * 6.0))
+            border_col = (0, 205, 255, pulse_a)
+        elif self.state == "waiting":
+            border_col = (50, 215, 120, 240)
+        else:
+            border_col = (70, 150, 255, 240)
         if self.emotion in ("dizzy", "exhausted", "error") or self.state == "stalled":
             border_col = (255, 95, 85, 240)
         elif self.emotion == "loving":
@@ -2039,12 +2064,13 @@ class PhoenixDynamicIslandOverlay:
 
         Working sweeps a rotating arc; done leaves a green ring that fades.
         """
-        work = self._activity_mix["working"]
+        is_working_act = bool(self.click_through or self.state in ("working", "thinking", "acting") or self.emotion == "working")
+        work = 1.0 if is_working_act else self._activity_mix["working"]
         done = self._activity_mix["done"]
         if work < 0.03 and done < 0.03 and self._done_flash < 0.03:
             return
         bg = (12, 13, 17)
-        accent = self._p()["accent"]
+        accent = (0, 215, 255) if is_working_act else self._p()["accent"]
         r = max(6, int(25 * s))
         t = self.anim_t
         if done > 0.03 or self._done_flash > 0.03:
@@ -2054,15 +2080,15 @@ class PhoenixDynamicIslandOverlay:
                                self._lerp_col(bg, (70, 225, 140), k),
                                (cx, cy), r, max(1, int(1.5 * s)))
         if work > 0.03:
-            speed = 2.4 + 2.2 * work
+            speed = 3.6 if is_working_act else (2.4 + 2.2 * work)
             for k in (work * 0.95, work * 0.45):
                 pygame.draw.arc(
                     self.ui_surface,
                     self._lerp_col(bg, accent, k),
                     pygame.Rect(cx - r, cy - r, r * 2, r * 2),
                     (t * speed) % (2 * math.pi),
-                    (t * speed) % (2 * math.pi) + 1.3,
-                    max(1, int(1.7 * s)))
+                    (t * speed) % (2 * math.pi) + 1.4,
+                    max(1, int(2.0 * s)))
 
     def _gaze_offset(self, cx: int, cy: int):
         """Eye offset: micro-saccades, plus cursor tracking while idle."""
@@ -2481,6 +2507,52 @@ class PhoenixDynamicIslandOverlay:
                 hy = cy - int(6 * custom_scale) + math.sin(wave_angle) * 4
                 pygame.draw.circle(self.ui_surface, (245, 248, 252), (int(hx), int(hy)), int(4 * custom_scale))
 
+        elif self.emotion == "working":
+            # --- MOCHI WORKING / ACTION EXECUTION EXPRESSION ---
+            # Active scanning eyes: Mochi focuses intently, scanning the screen with electric cyan irises
+            scan_x = math.sin(t * 8.0) * (2.8 * custom_scale)
+            brow_drop = int(1.2 * custom_scale)
+            for eye_x in (cx - int(7 * custom_scale), cx + int(7 * custom_scale)):
+                # Outer eye socket glow
+                pygame.draw.circle(self.ui_surface, (230, 245, 255), (eye_x, cy), int(4.5 * custom_scale))
+                # Electric cyan cyber iris actively scanning
+                pygame.draw.circle(self.ui_surface, (0, 195, 255), (int(eye_x + scan_x), cy), int(2.8 * custom_scale))
+                # Sharp white core pupil reflection
+                pygame.draw.circle(self.ui_surface, (255, 255, 255), (int(eye_x + scan_x + 0.8), cy - 1), int(1.2 * custom_scale))
+                # Determined, focused angled upper eyelid (Mochi concentration look)
+                brow_y = cy - int(2.2 * custom_scale)
+                pygame.draw.line(self.ui_surface, head_col,
+                                 (eye_x - int(5 * custom_scale), brow_y - brow_drop),
+                                 (eye_x + int(5 * custom_scale), brow_y + brow_drop), int(2.8 * custom_scale))
+
+            # Concentrated little mouth (determined focused line)
+            mouth_y = cy + int(7 * custom_scale)
+            mouth_w = int(4 * custom_scale)
+            pygame.draw.line(self.ui_surface, (30, 32, 45),
+                             (cx - mouth_w, mouth_y), (cx + mouth_w, mouth_y), int(2 * custom_scale))
+
+            # Concentration sparkle / sweat drop at the temple
+            sparkle_phase = math.sin(t * 7.0)
+            if sparkle_phase > -0.2:
+                sp_x = cx + int(14 * custom_scale)
+                sp_y = cy - int(9 * custom_scale)
+                pygame.draw.circle(self.ui_surface, (0, 220, 255), (sp_x, sp_y), int(2.4 * custom_scale))
+                pygame.draw.polygon(self.ui_surface, (0, 220, 255),
+                                    [(sp_x - 2, sp_y), (sp_x + 2, sp_y), (sp_x, sp_y - 3)])
+
+            # Orbiting energetic cyan computation particles (4 glowing dots)
+            for i in range(4):
+                ang = t * 6.5 + (i * 1.57)
+                ox = cx + math.cos(ang) * (21 * custom_scale)
+                oy = cy - int(10 * custom_scale) + math.sin(ang) * (6 * custom_scale)
+                pygame.draw.circle(self.ui_surface, (0, 220, 255), (int(ox), int(oy)), int(2 * custom_scale))
+
+            # Rosy cheeks of focused effort
+            pygame.draw.circle(self.ui_surface, (255, 175, 195, 180),
+                               (cx - int(11 * custom_scale), cy + int(4 * custom_scale)), int(2.5 * custom_scale))
+            pygame.draw.circle(self.ui_surface, (255, 175, 195, 180),
+                               (cx + int(11 * custom_scale), cy + int(4 * custom_scale)), int(2.5 * custom_scale))
+
         elif self.emotion == "thinking":
             # Pondering Eyes Looking Up-Left + Floating orbital ring
             look_x = -2.5 * custom_scale
@@ -2768,7 +2840,18 @@ class PhoenixDynamicIslandOverlay:
         # Emotion badge / state
         status_color = (50, 215, 120)
         status_label = "VLM Ready · Click to command"
-        if self.emotion == "greeting":
+        t_hud = time.time()
+        is_bot_working = bool(self.click_through or self.state in ("working", "thinking", "acting") or self.emotion == "working")
+
+        if is_bot_working:
+            status_color = (0, 215, 255)
+            if self.current_action:
+                status_label = f"⚡ Working: {self.current_action[:36]}"
+            elif self.current_thought:
+                status_label = f"⚡ Processing: {self.current_thought[:36]}"
+            else:
+                status_label = "⚡ Working on task · Executing..."
+        elif self.emotion == "greeting":
             status_label = "Hello there! Ready to assist!"
             status_color = (255, 215, 60)
         elif self.emotion == "loving":
@@ -2784,8 +2867,14 @@ class PhoenixDynamicIslandOverlay:
             status_label = "Something went wrong - checking it"
             status_color = (255, 95, 85)
 
-        pygame.draw.circle(self.ui_surface, status_color, (ix + 68, 44), 3)
-        st_txt = self.font_small.render(status_label, True, (160, 168, 185))
+        if is_bot_working:
+            pulse_r = max(4, int(4.5 + 2.0 * math.sin(t_hud * 8.0)))
+            pygame.draw.circle(self.ui_surface, (0, 190, 255), (ix + 68, 44), pulse_r, 1)
+            pygame.draw.circle(self.ui_surface, (0, 235, 255), (ix + 68, 44), 3)
+            st_txt = self.font_small.render(status_label, True, (130, 225, 255))
+        else:
+            pygame.draw.circle(self.ui_surface, status_color, (ix + 68, 44), 3)
+            st_txt = self.font_small.render(status_label, True, (160, 168, 185))
         self.ui_surface.blit(st_txt, (ix + 78, 38))
 
         # 4 Main App Shortcut Grid (header while idle, body column while working)

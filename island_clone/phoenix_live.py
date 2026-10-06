@@ -61,8 +61,9 @@ FEED_HZ = 8.0
 MOOD_EMOTION = {
     "idle": "idle",
     "listening": "greeting",
-    "thinking": "thinking",
-    "acting": "thinking",
+    "thinking": "working",
+    "acting": "working",
+    "working": "working",
     "speaking": "loving",
     "happy": "happy",
     "alert": "error",
@@ -74,8 +75,9 @@ MOOD_EMOTION = {
 MOOD_STATE = {
     "idle": "waiting",
     "listening": "waiting",
-    "thinking": "thinking",
-    "acting": "acting",
+    "thinking": "working",
+    "acting": "working",
+    "working": "working",
     "speaking": "working",
     "happy": "working",
     "alert": "working",

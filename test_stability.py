@@ -208,6 +208,15 @@ class TestDraggableIslandCalculations(unittest.TestCase):
         self.assertEqual(clamped_y, 0)
         self.assertEqual(clamped_x, center_x)
 
+    def test_working_emotion_and_click_scope(self):
+        # Verify M.PY has iw and ih scoped in _handle_click
+        with open("M.PY", "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("iw = int(self.current_width)", content)
+        self.assertIn("ih = int(self.current_height)", content)
+        self.assertIn('elif self.emotion == "working":', content)
+        self.assertIn('"working"', content)
+
 
 if __name__ == "__main__":
     unittest.main()
