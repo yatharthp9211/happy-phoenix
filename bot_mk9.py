@@ -934,7 +934,7 @@ def needs_vision(text, is_proactive=False):
     if FORCE_VISION:
         return True
     # If a task is actively running or an app was launched to interact with, vision is mandatory
-    if task_state.get("active") or task_state.get("target_launched") or task_state.get("driver"):
+    if task_state.get("active") or task_state.get("target_launched") or task_state.get("driver") or task_state.get("target_app"):
         last_vision_time = time.time()
         return True
     text = str(text or "").strip()
@@ -2376,7 +2376,8 @@ def brain_wants_work(text, is_proactive=False):
     except Exception as e:
         log_event("NEEDLE", f"work judge unavailable ({e}); using keywords")
         return _work_by_keyword(text)
-    words = str(content or "").strip().lower().replace("*", "").split()
+    clean_content = re.sub(r"<\s*(?:thought|think)\b[\s\S]*?(?:<\s*/\s*(?:thought|think)\s*>|$)", "", content, flags=re.IGNORECASE).strip()
+    words = str(clean_content or content or "").strip().lower().replace("*", "").split()
     verdict = words[0] if words else ""
     if verdict in _WORK_YES:
         return True
@@ -2455,8 +2456,9 @@ def process_interaction(text_input, is_proactive=False):
         task_state["goal_hint"] = text_input
         
         # Only activate the task loop if the user actually requested an action
-        is_action_intent = any(k in text_input.lower()
-                               for k in _ACTION_INTENT_KEYWORDS)
+        is_action_intent = (any(k in text_input.lower() for k in _ACTION_INTENT_KEYWORDS)
+                            or _message_requested(text_input)
+                            or bool(_extract_launch_app(text_input)))
         _reset_task()
         if not is_action_intent:
             task_state["active"] = False
@@ -2542,6 +2544,8 @@ def process_interaction(text_input, is_proactive=False):
                 task_state["target_contact"] = rx_contact
                 task_state["message_payload"] = rx_payload
                 task_state["messaging_phase"] = "FIND_CONTACT"
+                task_state["active"] = True
+                work_mode = True
                 log_event("TASK", f"[REGEX-FALLBACK] Activated MessagingDriver for '{rx_contact}' with payload '{rx_payload}'")
 
         # ---- Info / media routing (deterministic InfoDriver) ----
@@ -2661,9 +2665,7 @@ def process_interaction(text_input, is_proactive=False):
                 and task_state.get("driver") not in (
                     "notifications", "wikipedia", "google", "media")):
             target = (task_state['target_app'] or "").lower()
-            if target == "youtube" and task_state.get("expected_text"):
-                auto_cmd = f"play {task_state['expected_text']} on youtube"
-            elif target in ("google", "browser", "chrome") and task_state.get("expected_text"):
+            if target in ("google", "browser", "chrome") and task_state.get("expected_text"):
                 auto_cmd = f"google {task_state['expected_text']}"
             else:
                 auto_cmd = f"launch app {task_state['target_app']}"

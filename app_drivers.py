@@ -154,10 +154,48 @@ class SearchDriver(AppDriver):
                     best_any = i
                 if len(c.split()) <= 3:
                     return i
-        return best_any
+        # Geometric fallback for top-band search inputs (e.g. YouTube, media apps)
+        best_candidate = None
+        best_area = 0.0
+        for i, el in enumerate(dom):
+            t = (el.get("type") or "").strip().lower()
+            bbox = el.get("bbox", [0, 0, 0, 0])
+            if len(bbox) != 4:
+                continue
+            x, y = float(bbox[0]), float(bbox[1])
+            w = float(bbox[2]) - float(bbox[0])
+            h = float(bbox[3]) - float(bbox[1])
+            if t in ("input", "searchbox", "search") and y < 0.3 and x < 0.8:
+                area = w * h
+                if area > best_area:
+                    best_area = area
+                    best_candidate = i
+        return best_candidate or best_any
 
     def _find_result(self, host, dom, query):
-        return host.best_result(dom, query)
+        idx = host.best_result(dom, query)
+        if idx is not None:
+            return idx
+        # Geometric fallback for large central result/media cards
+        best_candidate = None
+        best_area = 0.0
+        for i, el in enumerate(dom):
+            t = (el.get("type") or "").strip().lower()
+            c = (el.get("content") or "").strip()
+            if not c or t in ("input", "search", "button"):
+                continue
+            bbox = el.get("bbox", [0, 0, 0, 0])
+            if len(bbox) != 4:
+                continue
+            y = float(bbox[1])
+            w = float(bbox[2]) - float(bbox[0])
+            h = float(bbox[3]) - float(bbox[1])
+            if 0.25 <= y <= 0.7 and h > 0.08:
+                area = w * h
+                if area > best_area:
+                    best_area = area
+                    best_candidate = i
+        return best_candidate
 
     def step(self, host):
         ts = host.ts
@@ -242,67 +280,8 @@ class SearchDriver(AppDriver):
         return True
 
 
-class YouTubeDriver(SearchDriver):
-    """YouTube-specific search/play driver.
-
-    Extra geometric heuristics beyond the generic driver: the YouTube search box
-    sits in the top band of the main content column (not the address/browser
-    chrome), so a wide input above y < 0.3 is a strong candidate even when the
-    omni-parser reports it as a plain 'input' with no 'search' label."""
-    name = "youtube"
-
-    def matches(self, ts):
-        if not super().matches(ts):
-            return False
-        app = (ts.get("target_app") or "").lower()
-        return "youtube" in app
-
-    def _find_search_input(self, dom):
-        idx = super()._find_search_input(dom)
-        if idx is not None:
-            return idx
-        best_candidate = None
-        best_area = 0.0
-        for i, el in enumerate(dom):
-            t = (el.get("type") or "").strip().lower()
-            bbox = el.get("bbox", [0, 0, 0, 0])
-            if len(bbox) != 4:
-                continue
-            x, y = float(bbox[0]), float(bbox[1])
-            w = float(bbox[2]) - float(bbox[0])
-            h = float(bbox[3]) - float(bbox[1])
-            if t in ("input", "searchbox", "search") and y < 0.3 and x < 0.8:
-                area = w * h
-                if area > best_area:
-                    best_area = area
-                    best_candidate = i
-        return best_candidate
-
-    def _find_result(self, host, dom, query):
-        idx = host.best_result(dom, query)
-        if idx is not None:
-            return idx
-        # Geometric fallback: YouTube's first video card is a large central box
-        # below the filter row (y between ~0.25 and ~0.6), left-aligned.
-        best_candidate = None
-        best_area = 0.0
-        for i, el in enumerate(dom):
-            t = (el.get("type") or "").strip().lower()
-            c = (el.get("content") or "").strip()
-            if not c or t in ("input", "search", "button"):
-                continue
-            bbox = el.get("bbox", [0, 0, 0, 0])
-            if len(bbox) != 4:
-                continue
-            y = float(bbox[1])
-            w = float(bbox[2]) - float(bbox[0])
-            h = float(bbox[3]) - float(bbox[1])
-            if 0.25 <= y <= 0.7 and h > 0.08:
-                area = w * h
-                if area > best_area:
-                    best_area = area
-                    best_candidate = i
-        return best_candidate
+# YouTube search and playback is handled directly by SearchDriver (unified driver)
+YouTubeDriver = SearchDriver
 
 
 class BaseMessagingDriver(AppDriver):
@@ -881,8 +860,6 @@ def select_app_driver(ts, host=None):
             return SnapchatDriver()
         return WhatsAppDriver()
     if ts.get("active") and ts.get("expected_text") and ts.get("target_launched"):
-        if "youtube" in (ts.get("target_app") or "").lower():
-            return YouTubeDriver()
         return SearchDriver()
     print(f"[DEBUG-DRIVER] select_app_driver returned None. active={ts.get('active')}, driver={ts.get('driver')}, contact={ts.get('target_contact')}")
     return None

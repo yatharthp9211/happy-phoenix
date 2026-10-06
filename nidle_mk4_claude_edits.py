@@ -597,18 +597,14 @@ def execute_task(task_description: str):
             r = wikipedia_search(query)
             return {"confidence": 1.0, "success": _ok(r), "results": r}
 
-    # youtube search / play (deterministic URL, opens browser instantly)
-    yt_q = None
-    m = re.search(r"(?:play|watch|listen to)\s+[\"']?(.+?)[\"']?\s+on\s+youtube\s*$", task_clean, re.I) or \
-        re.search(r"search\s+(?:for\s+)?[\"']?(.+?)[\"']?\s+on\s+youtube\s*$", task_clean, re.I) or \
-        re.search(r"youtube\s+(?:search\s+)?(?:for\s+)?[\"']?(.+?)[\"']?\s*$", task_clean, re.I) or \
-        re.search(r"(?:play|watch)\s+[\"']?(.+?)[\"']?\s+youtube\s*$", task_clean, re.I)
-    if m:
-        yt_q = m.group(1).strip()
-    if yt_q:
-        from urllib.parse import quote_plus
-        url = "https://www.youtube.com/results?search_query=" + quote_plus(yt_q)
-        r = surf_website(url)
+    # youtube: launch app via Windows Start menu (not via Chrome URL)
+    m_yt = (re.search(r"(?:play|watch|listen to)\s+[\"']?(.+?)[\"']?\s+on\s+youtube\s*$", task_clean, re.I) or
+            re.search(r"search\s+(?:for\s+)?[\"']?(.+?)[\"']?\s+on\s+youtube\s*$", task_clean, re.I) or
+            re.search(r"youtube\s+(?:search\s+)?(?:for\s+)?[\"']?(.+?)[\"']?\s*$", task_clean, re.I) or
+            re.search(r"(?:play|watch)\s+[\"']?(.+?)[\"']?\s+youtube\s*$", task_clean, re.I) or
+            re.search(r"^(?:launch|open)\s+(?:app\s+)?youtube\s*$", task_clean, re.I))
+    if m_yt:
+        r = launch_app("youtube")
         return {"confidence": 1.0, "success": _ok(r), "results": r}
 
     # google / web search (deterministic URL, no browser DOM needed)

@@ -75,10 +75,11 @@ class TestNeedleAndDispatch(unittest.TestCase):
         self.assertIn("start menu", r.lower())
 
     def test_deterministic_dispatch(self):
-        # YouTube play deterministic URL
+        # YouTube launched via Start menu (not via Chrome URL)
         res = self.nidle.execute_task("play believer on youtube")
         self.assertTrue(res["success"])
-        self.assertIn("youtube.com/results?search_query=believer", res["results"])
+        self.assertIn("youtube", res["results"].lower())
+        self.assertIn("start menu", res["results"].lower())
 
         # Google search deterministic URL
         res = self.nidle.execute_task("search for sanskarglobal.ai.studio on google")
@@ -119,6 +120,18 @@ class TestControlLoopAndGating(unittest.TestCase):
         )
         verdict_v = loop.validate(visual_act)
         self.assertEqual(verdict_v, control_loop.STALE_OBSERVATION)
+
+    def test_youtube_driver_unified_as_search_driver(self):
+        import app_drivers
+        ts = {
+            "active": True,
+            "target_app": "youtube",
+            "expected_text": "believer",
+            "target_launched": True,
+        }
+        driver = app_drivers.select_app_driver(ts)
+        self.assertIsInstance(driver, app_drivers.SearchDriver)
+        self.assertEqual(type(driver), app_drivers.SearchDriver)
 
 
 class TestTargetExtraction(unittest.TestCase):
