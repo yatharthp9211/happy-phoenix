@@ -917,15 +917,12 @@ def _vision_by_keyword(text, is_proactive=False):
         "click", "tap", "move", "find", "open", "launch", "where", "read", "type",
         "press", "button", "link", "window", "icon", "screen", "browser",
         "desktop", "search", "play", "see", "look", "this", "that", "show",
-        "box", "bar", "coordinate", "cursor", "mouse",
+        "box", "bar", "coordinate", "cursor", "mouse", "send", "whatsapp",
+        "snapchat", "telegram", "discord", "slack", "message", "chat",
     ]
     if any(k in text_lower for k in action_keywords):
         last_vision_time = time.time()
         return True
-    # There used to be a "more than 40s since the last look -> look now"
-    # timer here.  It woke the encoder on whatever chat turn happened to
-    # come next, which is the exact waste lazy vision exists to avoid, so
-    # falling back to keywords now genuinely means text-only.
     return False
 
 
@@ -935,6 +932,10 @@ def needs_vision(text, is_proactive=False):
     if is_proactive:
         return True
     if FORCE_VISION:
+        return True
+    # If a task is actively running or an app was launched to interact with, vision is mandatory
+    if task_state.get("active") or task_state.get("target_launched") or task_state.get("driver"):
+        last_vision_time = time.time()
         return True
     text = str(text or "").strip()
     if not text:
@@ -955,6 +956,10 @@ def needs_vision(text, is_proactive=False):
         log_event("VISION", f"brain wants the screen: {text[:60]!r}")
         return True
     if verdict in _VISION_NO:
+        if _vision_by_keyword(text, is_proactive):
+            last_vision_time = time.time()
+            log_event("VISION", f"brain said text-only but action keywords found -> activating vision")
+            return True
         log_event("VISION", f"brain answered text-only: {text[:60]!r}")
         return False
     log_event("VISION", f"vision judge unparseable ({content!r}); using keywords")
@@ -1707,6 +1712,8 @@ _ACTION_INTENT_KEYWORDS = (
     "type", "press", "pause", "resume", "mute", "volume", "music", "song",
     "video", "youtube", "spotify", "message", "dm", "text", "introduce",
     "notification", "wikipedia", "google", "web", "internet",
+    "send", "whatsapp", "snapchat", "telegram", "discord", "slack",
+    "write", "chat", "browse", "close", "run", "start", "find",
 )
 
 # True when the typed text shares no meaningful word with the requested query
@@ -2383,9 +2390,15 @@ def brain_wants_work(text, is_proactive=False):
 
 
 def _work_by_keyword(text):
-    """The old keyword test, kept ONLY as a fallback when the judge fails."""
+    """The action keyword test, ensuring commands and tasks trigger work."""
     t = str(text or "").lower()
-    return any(k in t for k in _ACTION_INTENT_KEYWORDS)
+    if any(k in t for k in _ACTION_INTENT_KEYWORDS):
+        return True
+    if _message_requested(t):
+        return True
+    if bool(_extract_launch_app(t)):
+        return True
+    return False
 
 
 def _extract_launch_app(text_input):
@@ -2630,6 +2643,9 @@ def process_interaction(text_input, is_proactive=False):
         if task_state["expected_text"]:
             task_state["expected_text"] = task_state["expected_text"].strip().strip("\"'")
             log_event("TASK", f"Expected text for verification: '{task_state['expected_text']}'")
+
+        if task_state.get("active") or task_state.get("target_app") or task_state.get("driver"):
+            work_mode = True
 
         # Auto-launch the requested app deterministically: the local model has
         # repeatedly FAILED to emit `launch app X`, so when the user's task
@@ -3094,7 +3110,8 @@ vision={VISION_MODE}
             if not sub_actions:
                 sub_actions = [raw_action_string]
 
-            if not (work_mode or FORCE_WORK):
+            is_work = bool(work_mode or FORCE_WORK or task_state.get("active") or task_state.get("driver") or task_state.get("target_app"))
+            if not is_work:
                 # The brain said this was not work, so its <ACTION> is prose,
                 # not a command.  Dispatching it used to TYPE it into whatever
                 # window had focus.  Drop it and let the reply be spoken.

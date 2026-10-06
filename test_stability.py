@@ -61,12 +61,18 @@ class TestNeedleAndDispatch(unittest.TestCase):
         self.assertEqual(text, "it's working")
         self.assertFalse(press)
 
-    def test_direct_launch_fastpaths(self):
-        r = self.nidle.launch_app("youtube")
-        self.assertIn("Opened browser", r)
+    def test_start_menu_launch(self):
+        # Snapchat shortcut launch via Start Menu
+        r = self.nidle.launch_app("snapchat")
+        self.assertTrue(self.nidle._ok(r))
+        self.assertIn("snapchat", r.lower())
+        self.assertIn("start menu", r.lower())
 
-        r = self.nidle.launch_app("google")
-        self.assertIn("Opened browser", r)
+        # WhatsApp launch via Start Menu
+        r = self.nidle.launch_app("whatsapp")
+        self.assertTrue(self.nidle._ok(r))
+        self.assertIn("whatsapp", r.lower())
+        self.assertIn("start menu", r.lower())
 
     def test_deterministic_dispatch(self):
         # YouTube play deterministic URL
@@ -79,10 +85,11 @@ class TestNeedleAndDispatch(unittest.TestCase):
         self.assertTrue(res["success"])
         self.assertIn("google.com/search?q=sanskarglobal.ai.studio", res["results"])
 
-        # Launch app
-        res = self.nidle.execute_task("launch app youtube")
+        # Launch app via Start Menu
+        res = self.nidle.execute_task("launch app snapchat")
         self.assertTrue(res["success"])
-        self.assertIn("youtube.com", res["results"])
+        self.assertIn("snapchat", res["results"].lower())
+        self.assertIn("start menu", res["results"].lower())
 
 
 class TestControlLoopAndGating(unittest.TestCase):

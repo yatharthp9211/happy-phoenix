@@ -254,6 +254,8 @@ def _foreground_title() -> str:
 
 def _wait_for_foreground_change(before: str, timeout: float = 2.5, poll: float = 0.2):
     """Block until the foreground window title differs from `before` or timeout."""
+    if not win32gui:
+        return "", False
     deadline = time.time() + timeout
     title = before
     while time.time() < deadline:
@@ -266,90 +268,44 @@ def _wait_for_foreground_change(before: str, timeout: float = 2.5, poll: float =
 
 @needle.tool
 def launch_app(app_name: str):
-    """Launch an application on Windows deterministically by its name or web destination."""
-    clean = (app_name or "").strip().lower()
+    """Launch an application or shortcut manually via Windows Start menu.
+    
+    Workflow:
+      1. Press Windows / Start button to open Start Menu and focus Search.
+      2. Type the application name or shortcut name into the search bar.
+      3. Wait for Windows 11 search indexer to highlight the shortcut or web search.
+      4. Press Enter to launch the app/shortcut (or trigger Windows 11 web search).
+    """
+    clean = (app_name or "").strip()
     if not clean:
         return "Failed to launch app: empty name."
 
-    # Direct fast-path for web applications and common tools
-    if clean in ("youtube", "youtube.com"):
-        return surf_website("https://www.youtube.com")
-    if clean in ("google", "google.com"):
-        return surf_website("https://www.google.com")
-    if clean in ("chrome", "google chrome", "browser"):
-        try:
-            subprocess.Popen(["cmd", "/c", "start", "chrome"], shell=True)
-            return "Launched Google Chrome"
-        except Exception:
-            return surf_website("https://www.google.com")
-    if clean in ("edge", "microsoft edge", "msedge"):
-        try:
-            subprocess.Popen(["cmd", "/c", "start", "msedge"], shell=True)
-            return "Launched Microsoft Edge"
-        except Exception:
-            pass
-    if clean in ("spotify", "whatsapp", "discord", "telegram", "slack"):
-        try:
-            subprocess.Popen(["cmd", "/c", "start", f"{clean}:"], shell=True)
-            return f"Launched {clean.capitalize()}"
-        except Exception:
-            pass
-    if clean in ("notepad", "notepad.exe"):
-        try:
-            subprocess.Popen(["notepad.exe"])
-            return "Launched Notepad"
-        except Exception:
-            pass
-    if clean in ("calc", "calculator", "calc.exe"):
-        try:
-            subprocess.Popen(["calc.exe"])
-            return "Launched Calculator"
-        except Exception:
-            pass
-    if clean in ("terminal", "cmd", "powershell", "wt", "bash"):
-        try:
-            subprocess.Popen(["cmd", "/c", "start", "wt"], shell=True)
-            return "Launched Terminal"
-        except Exception:
-            try:
-                subprocess.Popen(["cmd", "/c", "start", "powershell"], shell=True)
-                return "Launched PowerShell"
-            except Exception:
-                pass
-    if clean in ("vscode", "vs code", "code"):
-        try:
-            subprocess.Popen(["cmd", "/c", "start", "code"], shell=True)
-            return "Launched VS Code"
-        except Exception:
-            pass
-
-    # Direct Windows shell execution attempt
-    try:
-        subprocess.Popen(["cmd", "/c", "start", "", clean], shell=True)
-        time.sleep(0.6)
-        cur = _foreground_title()
-        if cur and any(tok in cur.lower() for tok in clean.split()):
-            return f"Launched '{app_name}' (window: '{cur}')"
-    except Exception:
-        pass
-
-    # Fallback to Start Menu keyboard invocation
+    # Manual Windows Start menu search and launch workflow
     try:
         before = _foreground_title()
+
+        # Step 1: Press the Start button (Windows key)
         pyautogui.press('win')
-        time.sleep(0.35)
-        if _NEEDS_CLIPBOARD.search(app_name):
-            _type_verbatim(app_name)
+        time.sleep(0.45)
+
+        # Step 2: Search for the app name or shortcut in the Start menu
+        if _NEEDS_CLIPBOARD.search(clean):
+            _type_verbatim(clean)
         else:
-            pyautogui.write(app_name, interval=0.03)
-        time.sleep(0.35)
+            pyautogui.write(clean, interval=0.035)
+
+        # Give Windows 11 search indexer time to locate the shortcut or app
+        time.sleep(0.55)
+
+        # Step 3: Press Enter to open the shortcut/app or trigger Windows web search
         pyautogui.press('enter')
-        title, ok = _wait_for_foreground_change(before, timeout=2.5)
-        if ok:
-            return f"Launched '{app_name}': foreground window is now '{title}'."
-        return f"Launched '{app_name}' via Start menu."
+
+        title, ok = _wait_for_foreground_change(before, timeout=3.0)
+        if ok and title:
+            return f"Opened '{clean}' via Start menu search (foreground: '{title}')."
+        return f"Searched and opened '{clean}' via Windows Start menu."
     except Exception as e:
-        return f"Failed to launch app '{app_name}': {e}"
+        return f"Failed to launch app '{app_name}' via Start menu: {e}"
 
 
 @needle.tool
