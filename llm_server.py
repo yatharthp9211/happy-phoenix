@@ -50,40 +50,62 @@ def _log(msg):
 
 
 def find_model_file():
-    """Locate the main Qwen3-VL-4B GGUF (never an mmproj file).
+    """Locate the main VLM model GGUF (MiniCPM-V-4.6 / Qwen3-VL, never an mmproj file).
 
-    Preference tiers: qwen3vl-named > q4_k_m > largest. A Downloads folder
-    full of other Q4 models (gemma etc.) must never win over the MK4 brain.
+    Preference tiers: minicpm > qwen3vl > q5_k_m > q4_k_m > largest.
     """
     env = os.environ.get("PHOENIX_MODEL")
     if env and Path(env).is_file():
         return Path(env)
     candidates = []
-    for base in (DOWNLOADS / "qwen3vl-4b", DOWNLOADS):
+    search_dirs = [
+        DOWNLOADS / "minicpm-v-4.6",
+        DOWNLOADS / "minicpm",
+        DOWNLOADS / "qwen3vl-4b",
+        DOWNLOADS,
+        Path.home() / "models",
+    ]
+    for base in search_dirs:
         if base.is_dir():
             for p in base.glob("*.gguf"):
                 if "mmproj" not in p.name.lower():
                     candidates.append(p)
-    candidates.sort(key=lambda p: ("qwen3vl" not in p.name.lower(),
-                                   "q4_k_m" not in p.name.lower(),
-                                   -p.stat().st_size))
-    return candidates[0] if candidates else None
+    if not candidates:
+        return None
+    candidates.sort(key=lambda p: (
+        "minicpm" not in p.name.lower() and "qwen" not in p.name.lower(),
+        "minicpm" not in p.name.lower(),
+        "q5_k_m" not in p.name.lower() and "q4_k_m" not in p.name.lower(),
+        -p.stat().st_size
+    ))
+    return candidates[0]
 
 
 def find_mmproj_file():
+    """Locate the vision projector GGUF for MiniCPM-V or Qwen-VL."""
     env = os.environ.get("PHOENIX_MMPROJ")
     if env and Path(env).is_file():
         return Path(env)
-    for base in (DOWNLOADS / "qwen3vl-4b", DOWNLOADS):
+    search_dirs = [
+        DOWNLOADS / "minicpm-v-4.6",
+        DOWNLOADS / "minicpm",
+        DOWNLOADS / "qwen3vl-4b",
+        DOWNLOADS,
+        Path.home() / "models",
+    ]
+    for base in search_dirs:
         if base.is_dir():
+            # 1. MiniCPM projector
+            for p in sorted(base.glob("mmproj*.gguf")):
+                if "minicpm" in p.name.lower():
+                    return p
+            # 2. Qwen projector
             for p in sorted(base.glob("mmproj*.gguf")):
                 if "qwen3vl" in p.name.lower():
                     return p
-            # Fall back to any mmproj for a 4B-class model if the name does
-            # not literally contain qwen3vl (renamed downloads).
+            # 3. Any standard mmproj file (e.g. mmproj-model-f16.gguf)
             for p in sorted(base.glob("mmproj*.gguf")):
-                if "4b" in p.name.lower():
-                    return p
+                return p
     return None
 
 
@@ -142,7 +164,7 @@ class LlamaServerManager:
             "--cache-type-k", "q8_0",
             "--cache-type-v", "q8_0",
         ]
-        if self.vision_enabled:
+        if self.vision_enabled and self.model_path and "qwen" in self.model_path.name.lower():
             # Qwen-VL grounding accuracy needs >=1024 image tokens (llama.cpp
             # #16842); the server warns and mis-grounds without this.
             cmd += ["--image-min-tokens", "1024"]

@@ -183,46 +183,207 @@ MEMORY_FILE = os.path.join(BASE_DIR, "memory.json")
 # MK4: long-edge cap for the screenshot sent to the VLM (token budget).
 IMAGE_MAX_DIM = int(os.environ.get("PHOENIX_IMG_MAX", "1280"))
 
-# ---------------- status overlay -------------------------------------------
+# ---------------- status overlay (Mochi Expressive Mascot) -----------------
 class StatusOverlay:
+    """Expressive floating desktop HUD indicator with Mochi robot face expressions.
+
+    Visualizes bot states with animated expressive eyes, cyber scanner beam,
+    orbital thinking halos, and task badges so the user always sees what the bot
+    is doing in real time.
+    """
     def __init__(self):
-        self.state = "waiting" # "waiting" (green), "working" (red)
+        self.state = "waiting" # "waiting", "thinking", "working", "acting", "done", "error"
+        self.detail = "Ready"
         self.root = None
         self.canvas = None
-        self.circle = None
+        self.tick = 0
+        self._done_until = 0.0
+        self._drag_data = {"x": 0, "y": 0}
+        self._lock = threading.Lock()
+
+    def _sync_island_ipc(self, state, detail):
+        try:
+            p_dir = Path.home() / ".phoenix"
+            p_dir.mkdir(parents=True, exist_ok=True)
+            ipc_file = p_dir / "island_state.json"
+            ipc_file.write_text(json.dumps({
+                "state": state,
+                "emotion": "working" if state in ("working", "acting") else ("thinking" if state == "thinking" else ("happy" if state == "done" else "idle")),
+                "detail": detail or "",
+                "ts": time.time(),
+            }), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _on_press(self, event):
+        self._drag_data["x"] = event.x
+        self._drag_data["y"] = event.y
+
+    def _on_drag(self, event):
+        if self.root:
+            deltax = event.x - self._drag_data["x"]
+            deltay = event.y - self._drag_data["y"]
+            x = self.root.winfo_x() + deltax
+            y = self.root.winfo_y() + deltay
+            self.root.geometry(f"+{x}+{y}")
 
     def _run(self):
-        self.root = tk.Tk()
-        self.root.overrideredirect(True)
-        self.root.attributes("-topmost", True)
-        self.root.attributes("-transparentcolor", "black")
-        # Place at top right corner
-        self.root.geometry("30x30+{}+10".format(self.root.winfo_screenwidth() - 40))
-        self.root.config(bg="black")
-        
-        self.canvas = tk.Canvas(self.root, width=30, height=30, bg="black", highlightthickness=0)
-        self.canvas.pack()
-        self.circle = self.canvas.create_oval(5, 5, 25, 25, fill="green", outline="green")
-        
-        self._update_loop()
-        self.root.mainloop()
-        
+        if tk is None:
+            return
+        try:
+            self.root = tk.Tk()
+            self.root.overrideredirect(True)
+            self.root.attributes("-topmost", True)
+            try:
+                self.root.attributes("-transparentcolor", "#010101")
+            except Exception:
+                pass
+            sw = self.root.winfo_screenwidth()
+            w, h = 160, 44
+            self.root.geometry(f"{w}x{h}+{sw - w - 24}+16")
+            self.root.config(bg="#010101")
+
+            self.canvas = tk.Canvas(self.root, width=w, height=h, bg="#010101", highlightthickness=0)
+            self.canvas.pack(fill="both", expand=True)
+
+            self.canvas.bind("<Button-1>", self._on_press)
+            self.canvas.bind("<B1-Motion>", self._on_drag)
+
+            self._update_loop()
+            self.root.mainloop()
+        except Exception:
+            pass
+
+    def _draw_capsule(self, x1, y1, x2, y2, r, fill, outline):
+        self.canvas.create_oval(x1, y1, x1 + 2 * r, y2, fill=fill, outline=outline)
+        self.canvas.create_oval(x2 - 2 * r, y1, x2, y2, fill=fill, outline=outline)
+        self.canvas.create_rectangle(x1 + r, y1, x2 - r, y2, fill=fill, outline=outline)
+        self.canvas.create_rectangle(x1 + r, y1 + 1, x2 - r, y2 - 1, fill=fill, outline="")
+
     def _update_loop(self):
-        if self.circle and self.canvas:
-            color = "green" if self.state == "waiting" else "red"
-            self.canvas.itemconfig(self.circle, fill=color, outline=color)
-        self.root.after(200, self._update_loop)
+        if not self.canvas:
+            return
+        self.tick += 1
+        now = time.time()
+        with self._lock:
+            st = self.state
+            det = self.detail
+
+        if st == "done" and self._done_until > 0 and now > self._done_until:
+            with self._lock:
+                self.state = "waiting"
+                self.detail = "Ready"
+                st = "waiting"
+                det = "Ready"
+
+        self.canvas.delete("all")
+
+        palettes = {
+            "waiting":  {"bg": "#0b0f19", "border": "#1e293b", "accent": "#00f0ff", "text": "IDLE",     "sub": det or "Ready"},
+            "thinking": {"bg": "#130f26", "border": "#4c1d95", "accent": "#a855f7", "text": "THINKING", "sub": det or "Planning..."},
+            "working":  {"bg": "#081b29", "border": "#0369a1", "accent": "#00e5ff", "text": "WORKING",  "sub": det or "Scanning..."},
+            "acting":   {"bg": "#241405", "border": "#92400e", "accent": "#f59e0b", "text": "ACTING",   "sub": det or "Executing..."},
+            "done":     {"bg": "#062215", "border": "#065f46", "accent": "#10b981", "text": "DONE",     "sub": det or "Finished"},
+            "error":    {"bg": "#230b0f", "border": "#991b1b", "accent": "#ef4444", "text": "ERROR",    "sub": det or "Attention"},
+        }
+        pal = palettes.get(st, palettes["waiting"])
+
+        self._draw_capsule(2, 2, 156, 40, 14, pal["bg"], pal["border"])
+
+        cx, cy = 24, 21
+        self.canvas.create_oval(cx - 15, cy - 15, cx + 15, cy + 15, fill="#0f172a", outline=pal["border"])
+
+        if st in ("waiting", "idle"):
+            blink = (self.tick % 80) >= 76
+            if blink:
+                self.canvas.create_line(cx - 7, cy, cx - 1, cy, width=2, fill="#00f0ff")
+                self.canvas.create_line(cx + 1, cy, cx + 7, cy, width=2, fill="#00f0ff")
+            else:
+                self.canvas.create_oval(cx - 8, cy - 5, cx - 2, cy + 3, fill="#00f0ff", outline="")
+                self.canvas.create_oval(cx + 2, cy - 5, cx + 8, cy + 3, fill="#00f0ff", outline="")
+                self.canvas.create_oval(cx - 7, cy - 4, cx - 5, cy - 2, fill="#ffffff", outline="")
+                self.canvas.create_oval(cx + 3, cy - 4, cx + 5, cy - 2, fill="#ffffff", outline="")
+            self.canvas.create_oval(cx - 11, cy + 5, cx - 7, cy + 8, fill="#ff85a2", outline="")
+            self.canvas.create_oval(cx + 7, cy + 5, cx + 11, cy + 8, fill="#ff85a2", outline="")
+
+        elif st in ("working", "scanning"):
+            self.canvas.create_line(cx - 9, cy - 6, cx - 2, cy - 4, width=2, fill="#38bdf8")
+            self.canvas.create_line(cx + 2, cy - 4, cx + 9, cy - 6, width=2, fill="#38bdf8")
+            self.canvas.create_line(cx - 8, cy - 1, cx - 2, cy, width=3, fill="#00f0ff")
+            self.canvas.create_line(cx + 2, cy, cx + 8, cy - 1, width=3, fill="#00f0ff")
+            scan_off = math.sin(self.tick * 0.3) * 11
+            bx = cx + scan_off
+            self.canvas.create_line(bx, cy - 12, bx, cy + 12, width=1, fill="#38bdf8")
+            self.canvas.create_line(cx - 2, cy + 6, cx + 2, cy + 6, width=1, fill="#94a3b8")
+            self.canvas.create_oval(cx - 11, cy + 5, cx - 7, cy + 8, fill="#ff85a2", outline="")
+            self.canvas.create_oval(cx + 7, cy + 5, cx + 11, cy + 8, fill="#ff85a2", outline="")
+
+        elif st == "thinking":
+            look_x, look_y = -2, -2
+            self.canvas.create_oval(cx - 7 + look_x, cy - 4 + look_y, cx - 1 + look_x, cy + 2 + look_y, fill="#c084fc", outline="")
+            self.canvas.create_oval(cx + 1 + look_x, cy - 4 + look_y, cx + 7 + look_x, cy + 2 + look_y, fill="#c084fc", outline="")
+            for i in range(3):
+                ang = self.tick * 0.25 + (i * 2.09)
+                ox = cx + math.cos(ang) * 14
+                oy = cy - 2 + math.sin(ang) * 5
+                self.canvas.create_oval(ox - 1.5, oy - 1.5, ox + 1.5, oy + 1.5, fill="#a855f7", outline="")
+
+        elif st == "acting":
+            self.canvas.create_oval(cx - 7, cy - 5, cx - 1, cy + 3, fill="#fbbf24", outline="")
+            self.canvas.create_oval(cx + 1, cy - 5, cx + 7, cy + 3, fill="#fbbf24", outline="")
+            pulse_r = 12 + int(math.sin(self.tick * 0.35) * 2.5)
+            self.canvas.create_oval(cx - pulse_r, cy - pulse_r, cx + pulse_r, cy + pulse_r, outline="#f59e0b", width=1)
+
+        elif st == "done":
+            self.canvas.create_arc(cx - 9, cy - 4, cx - 1, cy + 4, start=0, extent=180, style="arc", width=2, outline="#10b981")
+            self.canvas.create_arc(cx + 1, cy - 4, cx + 9, cy + 4, start=0, extent=180, style="arc", width=2, outline="#10b981")
+            self.canvas.create_arc(cx - 3, cy + 2, cx + 3, cy + 8, start=180, extent=180, style="arc", width=1.5, outline="#10b981")
+            self.canvas.create_oval(cx - 11, cy + 4, cx - 7, cy + 7, fill="#ff85a2", outline="")
+            self.canvas.create_oval(cx + 7, cy + 4, cx + 11, cy + 7, fill="#ff85a2", outline="")
+
+        else:
+            sh = cx + int(math.sin(self.tick * 0.8) * 1.5)
+            self.canvas.create_oval(sh - 7, cy - 5, sh - 1, cy + 3, fill="#ef4444", outline="")
+            self.canvas.create_oval(sh + 1, cy - 5, sh + 7, cy + 3, fill="#ef4444", outline="")
+            self.canvas.create_text(sh, cy - 10, text="!", fill="#ef4444", font=("Arial", 8, "bold"))
+
+        self.canvas.create_text(48, 14, anchor="w", text=pal["text"], fill=pal["accent"], font=("Segoe UI", 9, "bold"))
+        sub_text = pal["sub"]
+        if len(sub_text) > 16:
+            sub_text = sub_text[:15] + "…"
+        self.canvas.create_text(48, 28, anchor="w", text=sub_text, fill="#94a3b8", font=("Segoe UI", 8))
+
+        pulse_alpha = math.sin(self.tick * 0.2)
+        dot_col = pal["accent"] if pulse_alpha > -0.2 else pal["border"]
+        self.canvas.create_oval(144, 12, 148, 16, fill=dot_col, outline="")
+
+        self.root.after(35, self._update_loop)
 
     def start(self):
         t = threading.Thread(target=self._run, daemon=True)
         t.start()
-        
-    def set_state(self, state):
-        self.state = state
+
+    def set_state(self, state: str, detail: str = ""):
+        with self._lock:
+            self.state = state
+            if detail:
+                self.detail = str(detail)
+            elif state == "waiting":
+                self.detail = "Ready"
+            elif state == "working":
+                self.detail = "Working..."
+            elif state == "thinking":
+                self.detail = "Thinking..."
+            elif state == "acting":
+                self.detail = "Executing..."
+            elif state == "done":
+                self.detail = "Done!"
+                self._done_until = time.time() + 2.5
+        self._sync_island_ipc(state, detail)
 
 status_overlay = StatusOverlay()
 # MK4: automated checks (--self-check) skip the overlay dot; normal runs keep
-# the green/red indicator as in mk7.
+# the expressive Mochi indicator HUD.
 if not _SELF_CHECK:
     status_overlay.start()
 
@@ -1740,9 +1901,14 @@ def _drive_app_task(phase="pre"):
     if driver is None or driver.phase != phase:
         return False
     try:
-        return driver.step(host)
+        status_overlay.set_state("acting", f"{driver.name} step")
+        stepped = driver.step(host)
+        if stepped:
+            status_overlay.set_state("working", f"{driver.name} active")
+        return stepped
     except Exception as e:
         log_event("TASK", f"[APPD] {driver.name} step error: {e}")
+        status_overlay.set_state("error", f"{driver.name} error")
         return False
 
 def _classify_command(act_task):
@@ -1843,12 +2009,15 @@ def _orchestrator_gate(act_task):
 
 def _dispatch_proposal(proposal, act_task, screen_changed_hint=None):
     """Mark executing, dispatch to Needle (executor never re-validates), verify."""
+    status_overlay.set_state("acting", f"{act_task[:16]}")
     r = execution_state.start(proposal)
     if r == EXECUTOR_BUSY:
         log_event("TASK", "EXECUTOR_BUSY: another action in flight; dropping.")
+        status_overlay.set_state("waiting", "Busy")
         return {"success": False, "results": "EXECUTOR_BUSY"}
     if r != VALID:
         log_event("TASK", f"Double-execution guard refused {act_task}")
+        status_overlay.set_state("waiting", "Blocked")
         return {"success": False, "results": "DOUBLE_EXECUTION"}
     before_thumb = _thumb(latest_frame) if latest_frame is not None else None
     try:
@@ -1861,6 +2030,10 @@ def _dispatch_proposal(proposal, act_task, screen_changed_hint=None):
     res = nidle_mk4.execute_task(act_task)
     execution_state.mark_verify()
     success = bool(res.get("success")) if isinstance(res, dict) else True
+    if success:
+        status_overlay.set_state("done", "Step Done")
+    else:
+        status_overlay.set_state("error", "Failed")
     changed = screen_changed_hint
     if changed is None:
         with frame_lock:
@@ -2665,16 +2838,43 @@ vision={VISION_MODE}
                 generator = model.chat_stream(messages, grammar=None, **_gen_kwargs)
                 first_chunk = next(generator, None)
             except Exception as e2:
-                log_event("LLM", f"Fallback generation also crashed: {e2}")
+                log_event("LLM", f"Fallback generation crashed ({e2}); retrying plain text.")
+                plain_messages = []
+                for m in messages:
+                    c = m.get("content")
+                    if isinstance(c, list):
+                        t_parts = [item.get("text", "") for item in c if isinstance(item, dict) and item.get("type") == "text"]
+                        plain_messages.append({"role": m["role"], "content": "\n".join(t_parts) or str(c)})
+                    else:
+                        plain_messages.append(m)
+                try:
+                    generator = model.chat_stream(plain_messages, grammar=None, **_gen_kwargs)
+                    first_chunk = next(generator, None)
+                except Exception as e3:
+                    log_event("LLM", f"Text-only fallback also crashed: {e3}")
+                    generator = None
+                    first_chunk = None
+        else:
+            log_event("LLM", f"Generation failed: {e}; retrying text-only.")
+            plain_messages = []
+            for m in messages:
+                c = m.get("content")
+                if isinstance(c, list):
+                    t_parts = [item.get("text", "") for item in c if isinstance(item, dict) and item.get("type") == "text"]
+                    plain_messages.append({"role": m["role"], "content": "\n".join(t_parts) or str(c)})
+                else:
+                    plain_messages.append(m)
+            try:
+                generator = model.chat_stream(plain_messages, grammar=None, **_gen_kwargs)
+                first_chunk = next(generator, None)
+            except Exception as e3:
+                log_event("LLM", f"Text-only fallback crashed: {e3}")
                 generator = None
                 first_chunk = None
-        else:
-            log_event("LLM", f"Generation failed: {e}")
-            generator = None
-            first_chunk = None
 
     if first_chunk is None:
         generation_active = False
+        status_overlay.set_state("waiting", "Ready")
         return
 
     def stream_wrapper():
